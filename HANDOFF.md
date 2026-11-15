@@ -2,7 +2,7 @@
 **Date:** 2026-11-15 (late session)
 **Repo:** github.com/bigfguy8/Lca (public, MIT)
 **Working dir:** ~/lca (Termux)
-**Latest tag:** v5.0.1-r6 (HEAD = b22e9c7)
+**Latest tag:** v5.0.1-r7 (HEAD = f5c165b)
 **Purpose of this doc:** preserve full session state so the next
 update/upgrade session can resume without re-deriving anything.
 
@@ -15,9 +15,9 @@ update/upgrade session can resume without re-deriving anything.
   SHA256 → verify registry SHA256 → swap → stamp. Proven live.
 - **12 bugs fixed** across launcher / core / updater / manifest /
   signer / installers / docs.
-- **7 tags on origin:** v5.0.1, -r1, -r2, -r3, -r4, -r5, -r6.
+- **8 tags on origin:** v5.0.1, -r1, -r2, -r3, -r4, -r5, -r6, -r7.
 - **No blocking bugs.** Everything user-facing works.
-- **One optional app to uninstall:** ClozedCode LCA (see §5.1).
+- **ClozedCode app: keep installed** — not a release blocker (§5.1).
 
 ═══════════════════════════════════════════════════════════════
 ## 2. Current state (what works)
