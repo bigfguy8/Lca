@@ -31,10 +31,15 @@ if [ ! -d "${LCA_SRC}/bin" ] || [ ! -d "${LCA_SRC}/core" ] || [ ! -d "${LCA_SRC}
     LCA_SRC="${LCA_DIR}"
     BOOTSTRAPPED=0
   elif command -v git >/dev/null 2>&1; then
-    echo "install.sh: no local source — cloning from GitHub…" >&2
-    rm -rf "${LCA_DIR}"
-    git clone --depth 1 https://github.com/bigfguy8/lca.git "${LCA_DIR}" >&2
-    LCA_SRC="${LCA_DIR}"
+    # LCA_INSTALL_DIR may not propagate through `VAR=x cmd | sh`, so fall back
+    # to a safe throwaway dir rather than clobbering a dev ~/lca.
+    BOOTDIR="${LCA_INSTALL_DIR:-$HOME/lca-install}"
+    echo "install.sh: no local source — cloning into ${BOOTDIR}…" >&2
+    rm -rf "${BOOTDIR}"
+    mkdir -p "${BOOTDIR}"
+    git clone --depth 1 https://github.com/bigfguy8/lca.git "${BOOTDIR}" >&2
+    LCA_DIR="${BOOTDIR}"
+    LCA_SRC="${BOOTDIR}"
     BOOTSTRAPPED=1          # source == install dir; skip the rm/cp below
   else
     echo "install.sh: cannot find project layout in ${LCA_SRC} and git is missing." >&2
