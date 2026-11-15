@@ -68,4 +68,4 @@ detect_gpu
 # ---- 4. hand off to the closed core ----------------------------------
 export LCA_CORE_HOME="${LCA_HOME}"
 export LCA_GPU="${LCA_GPU:-cpu}"
-exec sh "${CORE}" "$@"
+exec bash "${CORE}" "$@"
