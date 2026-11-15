@@ -105,14 +105,17 @@ if command -v nc >/dev/null 2>&1; then
   echo "$$" > "${PIDFILE}"
   # nc -L -p PORT sh -c "handler"  →  spawn a handler per incoming connection
   # Each handler writes its own response; nc -L will keep listening.
+  # NOTE: the outer script has `set -eu`; the nc subshell inherits it, so
+  # every command that might fail must have `|| true` or it will abort the handler.
   export LCA_HOME
   exec nc -L -s 127.0.0.1 -p "${PORT}" sh -c '
-    _req="$(cat | tr -d "\r" | head -n 1)"
+    set +eu   # drop inherited -e inside the handler so grep misses dont kill it
+    _req="$(cat | tr -d "\r" | head -n 1 || true)"
     case "${_req}" in
       *GET*\ /status*)
-        _v="unknown"
-        _v="$(grep -oE "\"version\": *\"[^\"]*\"" "${LCA_HOME}/core/manifest.json" 2>/dev/null | cut -d\" -f4 | head -1 || echo unknown)"
-        _m="$(grep -oE "\"id\": *\"[a-z0-9.-]+\"" "${LCA_HOME}/core/registry.json" 2>/dev/null | cut -d\" -f4 | tr "\n" "," | sed "s/,$//")"
+        _v="$(grep -oE "\"version\": *\"[^\"]*\"" "${LCA_HOME}/core/manifest.json" 2>/dev/null | cut -d\" -f4 | head -1 || true)"
+        _v="${_v:-unknown}"
+        _m="$(grep -oE "\"id\": *\"[a-z0-9.-]+\"" "${LCA_HOME}/core/registry.json" 2>/dev/null | cut -d\" -f4 | tr "\n" "," | sed "s/,$//" || true)"
         printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
         printf "{\"version\":\"%s\",\"tier\":\"%s\",\"gpu\":\"%s\",\"models\":\"%s\"}\n" \
           "${_v}" "${LCA_TIER:-free}" "${LCA_GPU:-cpu}" "${_m}"
@@ -123,12 +126,13 @@ if command -v nc >/dev/null 2>&1; then
         ;;
       *GET*\ /*)
         printf "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
-        [[ -f "${LCA_HOME}/web/index.html" ]] && cat "${LCA_HOME}/web/index.html" || echo "no web UI"
+        if [ -f "${LCA_HOME}/web/index.html" ]; then cat "${LCA_HOME}/web/index.html"; else echo "no web UI"; fi
         ;;
       *)
         printf "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nnot found\n"
         ;;
     esac
+    exit 0
   '
 fi
 

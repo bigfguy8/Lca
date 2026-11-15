@@ -5,6 +5,6 @@
   "registry_sha256": "71c6574d0c1936fdba11d36025a0546a9dcc585a97a0825261b6d784d8124599",
   "core_url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/lca_core",
   "registry_url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/registry.json",
-  "update": {"url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/manifest.json"}
+  "update": {"url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/manifest.json"},
   "sig": "ef0be8a4427ed58283d378a689b410600cdd4b0410d339a8e1e36a58dd725b94"
 }

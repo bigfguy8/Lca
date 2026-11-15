@@ -1,6 +1,20 @@
+#!/usr/bin/env bash
+# lca core v4 (CLOSED-SOURCE — do not edit; see build_core.sh)
+#
+# v4 adds on top of v3:
+#   - skills: --skill <name> routes the task to an open capability pack
+#             (reverse/REA, ghidra, debug, test, security, perf, build)
+#   - auto-repair: a failed tool is retried ONCE with a fix hint (self-healing)
+#   - self-memory: persistent knowledge graph in .lca/memory.json
+#                  (what worked, what failed, file purpose, build/test cmds)
+#   - GPU-first: reads LCA_GPU (set by the launcher) and passes -ngl accordingly
+#   - unlimited: --unlimited removes the token/iteration cap (Pro only, or local)
+#
+# Maintainer rebuild: bash core/build_core.sh
 
 set -eu
 
+# ============================ paths / config =========================
 LCA_HOME="${LCA_CORE_HOME:-$(cd "$(dirname "${0}")/../.." && pwd)}"
 LCA_REGISTRY="${LCA_REGISTRY:-${LCA_HOME}/core/registry.json}"
 LCA_SKILLS="${LCA_SKILLS:-${LCA_HOME}/skills/skills.conf}"
@@ -10,6 +24,7 @@ LCA_TIER="${LCA_TIER:-free}"
 LCA_LICENSE="${LCA_LICENSE:-$HOME/.lca/license.json}"
 LCA_GPU="${LCA_GPU:-cpu}"
 
+# ============================ arg parse =================================
 CHAT=0; FAST=0; DOCTOR=0; UPGRADE=0; LEARN=0; SECURITY=0
 PROMPT=""; EXTRA_RULES=""; USE_MODEL=""; SKILL=""
 MODELS=""; MODELS_ARG=""; SESSIONS=""
@@ -83,12 +98,20 @@ EOF
   esac
 done
 
+# ============================ tier gate =================================
+# A signed Pro license is a JSON line:
+#   {"tier":"pro","email":"...","issued":"...","expires":"...","sig":"<sha256 of the rest>"}
+# "the rest" = the same JSON with the sig field removed. This lets us verify
+# offline, without calling any server, by recomputing the hash.
 license_signature() {  # $1 = the license json WITHOUT the sig line
   printf '%s' "$1" | sha256sum | awk '{print $1}'
 }
 license_verify() {     # verify the file at LCA_LICENSE; echo ok/bad
   [[ -f "${LCA_LICENSE}" ]] || { echo "no license file (${LCA_LICENSE})"; return 1; }
+  # The license file is a single JSON line:  {..body..,"sig":"<64hex>"}
+  # "body" = everything before the sig field. Strip via sed.
   local body hash actual
+  # body = the JSON object WITHOUT the "sig" field, exactly as signed.
   body="$(grep -oE '^\{.*"sig"' "${LCA_LICENSE}" | head -1 | sed -E 's/,"sig" *$//')"
   hash="$(grep -oE '"sig": *"[a-f0-9]{64}"' "${LCA_LICENSE}" | grep -oE '[a-f0-9]{64}' | head -1 || true)"
   [[ -n "${body}" ]] || body="$(cat "${LCA_LICENSE}")"
@@ -113,6 +136,7 @@ tier_ok() {
   esac
 }
 
+# ============================ license sub-commands =====================
 license_show() {
   echo "=== lca license ==="
   echo "  current tier : ${LCA_TIER}"
@@ -129,10 +153,12 @@ license_verify_cmd() {
   license_verify || return 1
   echo "✓ license signature valid (offline, no server)"
 }
+# MAINTAINER ONLY: issue a signed Pro license for an email.
 license_new() {
   local email="${LICENSE_EMAIL:-}"; [[ -n "${email}" ]] || { echo "usage: lca --license-new <email>"; return 1; }
   local issued exp sigline
   issued="$(date -u +%Y-%m-%d)"
+  # expiry: +365 days. GNU date supports -d; fall back to a fixed string.
   exp="$(date -u -d "+365 days" +%Y-%m-%d 2>/dev/null || echo "lifetime")"
   sigline="$(printf '{"tier":"pro","email":"%s","issued":"%s","expires":"%s"}' "${email}" "${issued}" "${exp}")"
   local sig; sig="$(license_signature "${sigline}")"
@@ -142,6 +168,7 @@ license_new() {
   echo "  activate: LCA_LICENSE=${LCA_HOME}/.lca/license.pro LCA_TIER=pro lca ..."
 }
 
+# ============================ system detect (GPU-first) ===============
 detect() {
   IS_TERMUX=0
   command -v termux-info >/dev/null 2>&1 && IS_TERMUX=1
@@ -154,27 +181,34 @@ detect() {
   elif (( RAM_MB < 12000)); then CTX=8192; TOK=1024; MAXIT=6; THREADS=4
   else                            CTX=16384; TOK=2048; MAXIT=8; THREADS=8
   fi
+  # GPU-first: a capable GPU lets us raise the context + token budget.
   case "${LCA_GPU}" in
     vulkan|metal|cuda)
+      # GPU offload: -ngl high, and we can afford a bigger ctx.
       NGL=99
       CTX=$(( CTX * 2 ))
       [[ "${LCA_TIER}" == "pro" ]] && { TOK=$(( TOK * 2 )); MAXIT=$(( MAXIT + 2 )); }
       ;;
     cpu) NGL=0 ;;
   esac
+  # Pro tier (CPU) gets bigger budgets too
   [[ "${LCA_TIER}" == "pro" ]] && { TOK=$(( TOK * 2 )); MAXIT=$(( MAXIT + 2 )); }
+  # unlimited flag (Pro, or free when using a local model)
   if [[ "${UNLIMITED}" -eq 1 ]]; then
     if [[ "${LCA_TIER}" == "pro" ]] && tier_ok pro 2>/dev/null; then
       TOK=8192; MAXIT=32; CTX=$(( CTX * 2 ))
-    elif [[ "${USE_MODEL:-auto}" == "auto" || -f "/sdcard/download/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf" ]]; then
+    elif [[ "${USE_MODEL:-auto}" == "auto" ]]; then
+      # free + local: allow a big budget (no cloud cost)
       TOK=4096; MAXIT=16
     else
       echo "--unlimited on cloud needs Pro. Using the standard budget." >&2
     fi
   fi
+  # parallel flag is Pro: verify the license once, here
   if [[ "${PARALLEL}" -eq 1 ]] && ! { [[ "${LCA_TIER}" == "pro" ]] && tier_ok pro 2>/dev/null; }; then
     PARALLEL=0; echo "--parallel is a Pro feature; using single-tool mode (run lca --license)" >&2
   fi
+  # load a learned profile if present
   if [[ -f "${LCA_HOME}/.lca/profile.json" ]]; then
     CTX="$(grep -oE '"ctx": *[0-9]+' "${LCA_HOME}/.lca/profile.json" | grep -oE '[0-9]+' | head -1 || echo "${CTX}")"
     TOK="$(grep -oE '"tok": *[0-9]+' "${LCA_HOME}/.lca/profile.json" | grep -oE '[0-9]+' | head -1 || echo "${TOK}")"
@@ -182,6 +216,7 @@ detect() {
   fi
 }
 
+# ============================ model registry =========================
 model_for_id() {
   local id="$1"
   [[ -f "${LCA_REGISTRY}" ]] || { echo "registry not found: ${LCA_REGISTRY}" >&2; return 1; }
@@ -208,6 +243,7 @@ model_for_id() {
   return 0
 }
 
+# ============================ ask =====================================
 ask() {
   _sys="$1"; _user="$2"
   case "${API:-llama}" in
@@ -241,7 +277,19 @@ ${_user}" > "${_pf}"
   esac
 }
 
-BASE_MASTER="$(printf '%s' 'WW91IGFyZSBhIGNvZGluZyBhZ2VudCBvbiBhIHBob25lLiBCZSB0ZXJzZS4KRWFjaCB0dXJuIG91dHB1dCBleGFjdGx5IE9ORSBsaW5lOgogIFRPT0wgYXJnClRvb2xzOgogIGxzIDxwYXRoPgogIGNhdCA8ZmlsZT4gICAgICAgICAgKGZpcnN0IDIwMCBsaW5lcykKICBncmVwIDxwYXR0ZXJuPgogIHdyaXRlIDxwYXRoPnw8Y29udGVudD4gICAgKGNvbnRlbnQgT05FIGxpbmUsIG5vIG5ld2xpbmVzOyBtYXggMTZLQikKICB3cml0ZWYgPHBhdGg+fDxiYXNlNjQ+ICAgIChtdWx0aS1saW5lIHNhZmU6IGJhc2U2NCBjb250ZW50KQogIHNoZWxsIDxjbWQ+ICAgICAgICAgIChubyBwaXBlcywgbm8gcmVkaXJlY3RzLCBubyBzdWRvKQogIGRvbmUKUnVsZXM6IDEgdG9vbCBwZXIgdHVybi4gU2hvcnQgZmlsZXMuIFdoZW4gZmluaXNoZWQ6IGRvbmU=' | base64 -d)"
+# ============================ master prompt =========================
+BASE_MASTER="You are a coding agent on a phone. Be terse.
+Each turn output exactly ONE line:
+  TOOL arg
+Tools:
+  ls <path>
+  cat <file>          (first 200 lines)
+  grep <pattern>
+  write <path>|<content>    (content ONE line, no newlines; max 16KB)
+  writef <path>|<base64>    (multi-line safe: base64 content)
+  shell <cmd>          (no pipes, no redirects, no sudo)
+  done
+Rules: 1 tool per turn. Short files. When finished: done"
 
 MASTER="${BASE_MASTER}"
 [[ -n "${EXTRA_RULES}" ]] && MASTER="${MASTER}
@@ -249,6 +297,7 @@ MASTER="${BASE_MASTER}"
 User rules:
 ${EXTRA_RULES}"
 
+# ---- parallel mode (Pro): the model may emit several tool lines at once --
 if [[ "${PARALLEL}" -eq 1 ]]; then
   MASTER="${MASTER}
 
@@ -261,9 +310,11 @@ Independent lines can be grouped:
   grep x c.txt"
 fi
 
+# ============================ skills ==================================
 load_skill() {
   local name="$1"
   [[ -f "${LCA_SKILLS}" ]] || { echo "skills.conf not found" >&2; return 1; }
+  # extract the [skill.<name>] block
   local block
   block="$(awk "/^\[skill\.${name}\]/{f=1;next} /^\[skill\./{f=0} f" "${LCA_SKILLS}")"
   [[ -n "${block}" ]] || { echo "unknown skill: ${name} (see skills.conf)" >&2; return 1; }
@@ -271,6 +322,7 @@ load_skill() {
   sprompt="$(printf '%s' "${block}" | grep '^prompt' | sed 's/^prompt *= *//' | tr -d '"' )"
   local sbin
   sbin="$(printf '%s' "${block}" | grep '^binaries' | cut -d= -f2 | tr -d ' "' || true)"
+  # check the binaries are present (warn, don't hard-fail)
   if [[ -n "${sbin}" ]]; then
     for b in ${sbin}; do
       if ! command -v "${b}" >/dev/null 2>&1; then
@@ -285,21 +337,60 @@ ${sprompt}"
   return 0
 }
 
+# ============================ self-memory ============================
+# memory.json is a JSON array of facts: {"key":..., "val":..., "ts":...}
+# Use python3 for JSON safety; fall back to a line-append if python3 is missing.
 memory_note() {
-  local key="$1" val="$2"
+  local key="$1" val="$2" ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   mkdir -p "$(dirname "${LCA_MEMORY}")"
   [[ -f "${LCA_MEMORY}" ]] || echo "[]" > "${LCA_MEMORY}"
-  grep -v "\"key\":\"${key}\"" "${LCA_MEMORY}" > "${LCA_MEMORY}.tmp" || true
-  cat "${LCA_MEMORY}.tmp" | sed 's/] *$//' > "${LCA_MEMORY}.new"
-  printf '%s\n  {"key":"%s","val":"%s","ts":"%s"}\n' \
-    "$(cat "${LCA_MEMORY}.new" | sed 's/] *$//')" \
-    "${key}" "$(printf '%s' "${val}" | sed 's/"/\\"/g' | head -c 200)" \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${LCA_MEMORY}"
-  echo "]" >> "${LCA_MEMORY}"
-  rm -f "${LCA_MEMORY}.tmp" "${LCA_MEMORY}.new"
+  val="${val:0:200}"
+  # JSON-escape the value (backslash, double-quote)
+  val="${val//\\/\\\\}"; val="${val//\"/\\\"}"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${LCA_MEMORY}" "${key}" "${val}" "${ts}" <<'PY'
+import json, sys
+path, key, val, ts = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    with open(path) as f: arr = json.load(f)
+    if not isinstance(arr, list): arr = []
+except Exception:
+    arr = []
+# upsert: drop any entry with the same key, append new
+arr = [e for e in arr if e.get("key") != key]
+arr.append({"key": key, "val": val, "ts": ts})
+with open(path, "w") as f: json.dump(arr, f, indent=1)
+PY
+  else
+    # POSIX fallback: rewrite the array line-by-line
+    local tmp="${LCA_MEMORY}.tmp"
+    : > "${tmp}"
+    printf '[\n' >> "${tmp}"
+    local first=1
+    while IFS= read -r line; do
+      case "${line}" in
+        "\]"*) : ;;  # skip the closing bracket; we rewrite it
+        "") : ;;
+        *)
+          # skip entries with the same key
+          case "${line}" in
+            *"\"key\":\"${key}\""*) continue ;;
+          esac
+          if [ "${first}" -eq 1 ]; then first=0; else printf ',\n' >> "${tmp}"; fi
+          printf '%s' "${line}" >> "${tmp}"
+          ;;
+      esac
+    done < "${LCA_MEMORY}"
+    printf ',\n' >> "${tmp}"
+    printf '  {"key":"%s","val":"%s","ts":"%s"}\n' "${key}" "${val}" "${ts}" >> "${tmp}"
+    printf ']\n' >> "${tmp}"
+    mv "${tmp}" "${LCA_MEMORY}"
+  fi
 }
 
 memory_inject() {
+  # return a compact summary of memory to append to the master prompt
   [[ -f "${LCA_MEMORY}" ]] || return 0
   local summary
   summary="$(grep -oE '"key":"[^"]*","val":"[^"]*"' "${LCA_MEMORY}" | head -n 12 || true)"
@@ -315,6 +406,8 @@ memory_list() {
   grep -oE '"key":"[^"]*","val":"[^"]*"' "${LCA_MEMORY}" | sed 's/^/  /' || echo "  (empty)"
 }
 
+# ============================ auto-repair ===========================
+# run a tool; if it fails, retry ONCE with a fix hint. Returns combined obs.
 run_tool_smart() {
   local line="$1"
   local out out2
@@ -340,6 +433,7 @@ run_tool_smart() {
   esac
 }
 
+# ============================ sessions ==============================
 sessions_log() {
   mkdir -p "$(dirname "${LCA_SESSIONS}")"
   printf '{"ts":"%s","model":"%s","skill":"%s","prompt":"%s","tools":"%s","verdict":"%s","gpu":"%s","secs":%s}\n' \
@@ -363,6 +457,7 @@ sessions_resume() {
   return 0
 }
 
+# ============================ learn =================================
 learn() {
   detect
   USE_MODEL="${USE_MODEL:-$(cat "${LCA_HOME}/.lca/default_model" 2>/dev/null || echo auto)}"
@@ -383,6 +478,7 @@ learn() {
   echo "✓ profile saved: ${tps} tok/s on ${LCA_GPU} → ctx=${ctx} tok=${tok} maxit=${maxit}"
 }
 
+# ============================ security scan =========================
 security_scan() {
   echo "── security scan of $(pwd) ──"
   findings=0
@@ -405,6 +501,8 @@ security_scan() {
   fi
 }
 
+# ============================ local service discovery =================
+# Probe common Ollama / LM Studio ports; report what's serving, and offer to register.
 discover_local() {
   echo "  scanning local OpenAI-compatible endpoints ..."
   _found=0
@@ -416,6 +514,7 @@ discover_local() {
       2*)
         _found=1
         echo "  ✓ ${name} live at ${url}  (id: ${name})"
+        # register it automatically if not already present
         if ! grep -qE "\"${name}\": *{" "${LCA_REGISTRY}" 2>/dev/null; then
           echo "  …registering '${name}' in the registry"
           lb="$(grep -n '^}' "${LCA_REGISTRY}" | tail -1 | cut -d: -f1)"
@@ -428,6 +527,7 @@ discover_local() {
   [[ ${_found} -eq 0 ]] && echo "  (no local Ollama/LM Studio found; start one to auto-discover)"
 }
 
+# ============================ models add wizard =====================
 models_add() {
   detect
   echo "=== lca models add ==="
@@ -474,6 +574,7 @@ models_test() {
   echo "  ${MODELS_ARG} → '${out}' in $(( t1 - t0 ))s"
 }
 
+# ============================ route sub-commands =====================
 case "${MODELS}" in
   list)   detect; echo "registered models:"; grep -oE '"id": *"[a-z0-9.-]+"' "${LCA_REGISTRY}" 2>/dev/null | sed 's/^/  /' || echo "  (empty)"; echo "  default: $(cat "${LCA_HOME}/.lca/default_model" 2>/dev/null || echo auto)"; discover_local; echo "  add: lca models add   use: lca models use <id>   test: lca models test <id>"; exit 0 ;;
   add)    models_add; exit 0 ;;
@@ -492,6 +593,7 @@ fi
 [[ "${LEARN}" -eq 1 ]]    && { detect; learn; exit 0; }
 [[ "${SECURITY}" -eq 1 ]] && { security_scan; exit 0; }
 
+# ---- license sub-commands (offline verify; no server auth) ----------
 if [[ -n "${LICENSE_CMD}" ]]; then
   case "${LICENSE_CMD}" in
     show)   license_show; exit 0 ;;
@@ -500,6 +602,7 @@ if [[ -n "${LICENSE_CMD}" ]]; then
   esac
 fi
 
+# ============================ default model =========================
 detect
 USE_MODEL="${USE_MODEL:-$(cat "${LCA_HOME}/.lca/default_model" 2>/dev/null || echo auto)}"
 if [[ "${FAST}" -eq 1 ]]; then
@@ -507,9 +610,12 @@ if [[ "${FAST}" -eq 1 ]]; then
 fi
 model_for_id "${USE_MODEL}" || exit 1
 
+# ============================ skill + memory + rules ================
 [[ -n "${SKILL}" ]] && load_skill "${SKILL}"
 memory_inject
 
+# ---- per-project rules: .lca/rules.md is auto-appended to the prompt ---
+# Look in the CWD first (the project you're in), then the global .lca/rules.md.
 for _r in "./.lca/rules.md" "${LCA_HOME}/.lca/rules.md"; do
   if [[ -f "${_r}" ]]; then
     _rc="$(head -c 2000 "${_r}" 2>/dev/null)"
@@ -521,10 +627,12 @@ ${_rc}
   fi
 done
 
+# ============================ tool layer ============================
 LCA_SRC="${LCA_HOME}/src"
 [[ -f "${LCA_SRC}/tools.sh" ]] || { echo "src/tools.sh missing" >&2; exit 1; }
 . "${LCA_SRC}/tools.sh"
 
+# ============================ chat mode =============================
 if [[ "${CHAT}" -eq 1 ]]; then
   echo "lca chat [${USE_MODEL} ${SKILL:+| skill:${SKILL}}] (Ctrl-D to quit)"
   while IFS= read -r line; do
@@ -534,6 +642,7 @@ if [[ "${CHAT}" -eq 1 ]]; then
   sessions_log "chat" "chat"; exit 0
 fi
 
+# ============================ doctor =================================
 if [[ "${DOCTOR}" -eq 1 ]]; then
   echo "lca doctor (v5)"
   echo "  tier: ${LCA_TIER}   gpu: ${LCA_GPU}   termux: ${IS_TERMUX}"
@@ -545,10 +654,12 @@ if [[ "${DOCTOR}" -eq 1 ]]; then
   exit 0
 fi
 
+# ============================ upgrade ===============================
 if [[ "${UPGRADE}" -eq 1 ]]; then
   echo "lca: run the updater: lca-update (see bin/lca-update)" >&2; exit 0
 fi
 
+# ============================ tool loop (with auto-repair) =========
 PROMPT="${PROMPT:-What do you want to build?}"
 _uw="${PROMPT}
 
@@ -557,6 +668,7 @@ Current dir:
 $(ls -la 2>&1 | head -n 30)"
 user_block="${_uw}"
 
+# ---- parallel runner (Pro): collect up to 3 independent tool lines ----
 run_parallel() {
   local reply="$1"
   local lines n=0 obsall="" t _lp
@@ -603,6 +715,7 @@ Next tool(s) (up to 3 independent lines):"
     continue
   fi
 
+  # ---- single-tool mode (Free default) ----
   tool_line="$(printf '%s\n' "${reply}" | grep -E '^[a-z]+ ' | head -n 1 || true)"
   if [[ -z "${tool_line}" ]]; then
     echo "final answer:" >&2; printf '%s\n' "${reply}"
@@ -623,7 +736,11 @@ Next tool (ONE line only):"
   user_block="${_us}"
 done
 _t1="$(date +%s)"; _SECS=$(( _t1 - _t0 ))
-memory_note "last_run" "prompt=${PROMPT:0:60} skill=${SKILL:-none} turns=${i} secs=${_SECS}"
+# remember what worked
+# POSIX-safe truncation (the core runs under sh, so ${var:0:60} is not available)
+_short_prompt="$(printf '%s' "${PROMPT}" | cut -c1-60)"
+memory_note "last_run" "prompt=${_short_prompt} skill=${SKILL:-none} turns=${i} secs=${_SECS}"
 sessions_log "ok" "${_tools_used}"
 echo "── finished at turn ${i} [${USE_MODEL}] in ${_SECS}s ──" >&2
 echo "  logged. Resume: lca --resume   Memory: lca --memory" >&2
+#x

@@ -50,9 +50,9 @@ lca_run_tool() {
         && echo "wrote ${_path} (base64)" \
         || echo "base64 decode failed for ${_path}" ;;
     shell)
-      # refuse: pipes, redirects, sudo, rm -rf /, etc.
+      # refuse: pipes, redirects, sudo, rm -rf with / or /*, and common destructive patterns
       case "${_arg}" in
-        *"|"*|*">"*|*"<<"*|*sudo*|*"rm -rf /"*)
+        *"|"*|*">"*|*"<<"*|*sudo*|*"rm -rf /"*|*"rm -rf /*"*|*"rm -rf \"/*\""*|*"rm -rf '/*'"*)
           echo "Refusing: pipes/redirects/sudo/dangerous not allowed"; return 1 ;;
       esac
       ( eval "${_arg}" ) 2>&1 | head -n 40 ;;

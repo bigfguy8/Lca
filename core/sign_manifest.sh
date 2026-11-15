@@ -24,14 +24,15 @@ body="$(cat <<EOF
   "registry_sha256": "${reg_sha}",
   "core_url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/lca_core",
   "registry_url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/registry.json",
-  "update": {"url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/manifest.json"}
+  "update": {"url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/manifest.json"},
+  "sig": "PLACEHOLDER"
 }
 EOF
 )"
 # sig = sha256 of the body
 sig="$(printf '%s' "${body}" | sha256sum | awk '{print $1}')"
-# insert the sig line before the closing brace
-printf '%s\n' "${body}" | sed "s/^}/  \"sig\": \"${sig}\"\n}/" > manifest.json
+# replace the PLACEHOLDER sig value with the real one
+printf '%s\n' "${body}" | sed "s/\"sig\": \"PLACEHOLDER\"/\"sig\": \"${sig}\"/" > manifest.json
 
 echo "signed manifest for v${ver}:"
 echo "  core_sha256:     ${core_sha}"
