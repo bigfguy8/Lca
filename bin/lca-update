@@ -13,7 +13,7 @@
 
 set -eu
 
-LCA_HOME="${LCA_CORE_HOME:-$(cd "$(dirname "${0}")/../.." && pwd)}"
+LCA_HOME="${LCA_CORE_HOME:-$(cd "$(dirname "${0}")/.." && pwd)}"
 REG="${LCA_HOME}/core/registry.json"
 MANIFEST="${LCA_HOME}/core/manifest.json"
 MANIFEST_URL=""
@@ -45,7 +45,7 @@ trap 'rm -rf "${tmp}"' EXIT
 curl -fsSL "${MANIFEST_URL}" -o "${tmp}/manifest.json" || { echo "fetch failed" >&2; exit 1; }
 
 # verify sig: sha256 of manifest minus the sig line == sig
-body="$(grep -v '"sig"' "${tmp}/manifest.json" || true)"
+body="$(sed -E 's/"sig": *"[a-f0-9]{64}"/"sig": "PLACEHOLDER"/' "${tmp}/manifest.json")"
 expected="$(grep -oE '"sig": *"[a-f0-9]{64}"' "${tmp}/manifest.json" | grep -oE '[a-f0-9]{64}' | head -1)"
 actual="$(printf '%s' "${body}" | sha256sum | awk '{print $1}')"
 [[ -n "${expected}" && "${expected}" == "${actual}" ]] || { echo "manifest sig mismatch" >&2; exit 1; }

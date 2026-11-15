@@ -27,6 +27,10 @@ else
   LCA_HOME="${HOME}/.lca"
 fi
 [[ -d "${LCA_HOME}" ]] || { echo "lca: project not found (set LCA_HOME)" >&2; exit 1; }
+if [[ "${1:-}" == "--upgrade" ]]; then
+  LCA_CORE_HOME="${LCA_HOME}" exec bash "${LCA_HOME}/bin/lca-update" "${@:2}"
+fi
+
 
 CORE="${LCA_HOME}/core/lca_core"
 SUM="${LCA_HOME}/core/lca_core.sha256"

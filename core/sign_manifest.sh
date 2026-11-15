@@ -22,9 +22,9 @@ body="$(cat <<EOF
   "released": "$(date -u +%Y-%m-%d)",
   "core_sha256": "${core_sha}",
   "registry_sha256": "${reg_sha}",
-  "core_url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/lca_core",
-  "registry_url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/registry.json",
-  "update": {"url": "https://raw.githubusercontent.com/bigfguy8/lca/main/core/manifest.json"},
+  "core_url": "https://raw.githubusercontent.com/bigfguy8/Lca/main/core/lca_core",
+  "registry_url": "https://raw.githubusercontent.com/bigfguy8/Lca/main/core/registry.json",
+  "update": {"url": "https://raw.githubusercontent.com/bigfguy8/Lca/main/core/manifest.json"},
   "sig": "PLACEHOLDER"
 }
 EOF
