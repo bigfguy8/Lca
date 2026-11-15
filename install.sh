@@ -24,15 +24,18 @@ LCA_TIER="${LCA_TIER:-free}"
 
 # ---- 1. locate project ------------------------------------------------
 # Detect the bootstrap case: no local source layout in LCA_SRC.
+BOOTSTRAPPED=0
 if [ ! -d "${LCA_SRC}/bin" ] || [ ! -d "${LCA_SRC}/core" ] || [ ! -d "${LCA_SRC}/src" ]; then
   # If LCA_INSTALL_DIR was explicitly given and already holds a checkout, reuse it.
   if [ -n "${LCA_INSTALL_DIR:-}" ] && [ -d "${LCA_DIR}/bin" ] && [ -d "${LCA_DIR}/core" ]; then
     LCA_SRC="${LCA_DIR}"
+    BOOTSTRAPPED=0
   elif command -v git >/dev/null 2>&1; then
     echo "install.sh: no local source — cloning from GitHub…" >&2
     rm -rf "${LCA_DIR}"
     git clone --depth 1 https://github.com/bigfguy8/lca.git "${LCA_DIR}" >&2
     LCA_SRC="${LCA_DIR}"
+    BOOTSTRAPPED=1          # source == install dir; skip the rm/cp below
   else
     echo "install.sh: cannot find project layout in ${LCA_SRC} and git is missing." >&2
     echo "install.sh: run from the lca/ project dir (sh install.sh) or install git first." >&2
@@ -42,29 +45,35 @@ fi
 
 # Safety: never install into a dir that is the same as (or a parent of) the
 # source we just located — that would `rm -rf` the source before the copy.
-case "${LCA_SRC}" in
-  "${LCA_DIR}"|"${LCA_DIR}/"*)
-    echo "install.sh: LCA_SRC (${LCA_SRC}) is inside LCA_DIR (${LCA_DIR}); refusing to self-delete." >&2
-    echo "install.sh: pass LCA_INSTALL_DIR pointing elsewhere, or run from a clean checkout." >&2
-    exit 1 ;;
-esac
-case "${LCA_DIR}" in
-  "${LCA_SRC}"|"${LCA_SRC}/"*)
-    echo "install.sh: LCA_DIR (${LCA_DIR}) is the source dir; install to a fresh dir instead." >&2
-    echo "install.sh: try: LCA_INSTALL_DIR=\$HOME/lca-install sh install.sh" >&2
-    exit 1 ;;
-esac
+if [ "${BOOTSTRAPPED}" -eq 0 ]; then
+  case "${LCA_SRC}" in
+    "${LCA_DIR}"|"${LCA_DIR}/"*)
+      echo "install.sh: LCA_SRC (${LCA_SRC}) is inside LCA_DIR (${LCA_DIR}); refusing to self-delete." >&2
+      echo "install.sh: pass LCA_INSTALL_DIR pointing elsewhere, or run from a clean checkout." >&2
+      exit 1 ;;
+  esac
+  case "${LCA_DIR}" in
+    "${LCA_SRC}"|"${LCA_SRC}/"*)
+      echo "install.sh: LCA_DIR (${LCA_DIR}) is the source dir; install to a fresh dir instead." >&2
+      echo "install.sh: try: LCA_INSTALL_DIR=\$HOME/lca-install sh install.sh" >&2
+      exit 1 ;;
+  esac
+fi
 
 # ---- 2. install -------------------------------------------------------
-rm -rf "${LCA_DIR}"
-mkdir -p "${LCA_DIR}"
-# copy the tree (robust: use `cp -r SRC DST` which copies the directory itself)
-cp -R "${LCA_SRC}/bin" "${LCA_DIR}/bin"
-cp -R "${LCA_SRC}/core" "${LCA_DIR}/core"
-cp -R "${LCA_SRC}/src" "${LCA_DIR}/src"
-cp -R "${LCA_SRC}/skills" "${LCA_DIR}/skills" 2>/dev/null || true
-cp -R "${LCA_SRC}/web" "${LCA_DIR}/web" 2>/dev/null || true
-cp "${LCA_SRC}"/LICENSE "${LCA_SRC}"/NOTICE "${LCA_SRC}"/README.md "${LCA_DIR}/" 2>/dev/null || true
+if [ "${BOOTSTRAPPED}" -eq 1 ]; then
+  # The clone IS the install dir; nothing to copy.
+  :
+else
+  rm -rf "${LCA_DIR}"
+  mkdir -p "${LCA_DIR}"
+  cp -R "${LCA_SRC}/bin" "${LCA_DIR}/bin"
+  cp -R "${LCA_SRC}/core" "${LCA_DIR}/core"
+  cp -R "${LCA_SRC}/src" "${LCA_DIR}/src"
+  cp -R "${LCA_SRC}/skills" "${LCA_DIR}/skills" 2>/dev/null || true
+  cp -R "${LCA_SRC}/web" "${LCA_DIR}/web" 2>/dev/null || true
+  cp "${LCA_SRC}"/LICENSE "${LCA_SRC}"/NOTICE "${LCA_SRC}"/README.md "${LCA_DIR}/" 2>/dev/null || true
+fi
 chmod +x "${LCA_DIR}/bin/lca.sh" "${LCA_DIR}/bin/lca-update" "${LCA_DIR}/bin/lca-web" \
          "${LCA_DIR}/core/lca_core" "${LCA_DIR}/src/tools.sh" 2>/dev/null || true
 
