@@ -41,7 +41,7 @@ INTEGRITY — all verified:
   manifest reg_sha256   = 71c6574d0c1936fdba11d36025a0546a9dcc585a97a0825261b6d784d8124599
   local registry hash   = 71c6574d... (SAME)
   manifest sig          = a49498d234eb69185d161981d932f850031e6bf2b91e024b451e6c4ecf46fa94
-  lca_core.sha256 file  = d75e9e6d... (SAME as manifest)
+  lca_core.sha256 file  = 45cd5d8c... (SAME as manifest)
 
 ═══════════════════════════════════════════════════════════════
 ## 3. Version history (git tags)
