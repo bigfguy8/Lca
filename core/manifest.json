@@ -1,10 +1,10 @@
 {
-  "version": "5.0.1",
+  "version": "5.0.2",
   "released": "2026-11-15",
-  "core_sha256": "d75e9e6d3064b2c30a9468e6a0f21e0230e0835f6b6b24c5a23dc652a2f8fcf2",
+  "core_sha256": "45cd5d8ce7fd303e20657c0abe5f7133f522baf0d904172f746b1c2cacb9dcff",
   "registry_sha256": "71c6574d0c1936fdba11d36025a0546a9dcc585a97a0825261b6d784d8124599",
   "core_url": "https://raw.githubusercontent.com/bigfguy8/Lca/main/core/lca_core",
   "registry_url": "https://raw.githubusercontent.com/bigfguy8/Lca/main/core/registry.json",
   "update": {"url": "https://raw.githubusercontent.com/bigfguy8/Lca/main/core/manifest.json"},
-  "sig": "94a23bd5d96bd7c4fb7edad55e82523c900e6c3384ab41b3c9878ba37f08a7df"
+  "sig": "a49498d234eb69185d161981d932f850031e6bf2b91e024b451e6c4ecf46fa94"
 }

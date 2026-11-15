@@ -1,7 +1,7 @@
 
 set -eu
 
-LCA_HOME="${LCA_CORE_HOME:-$(cd "$(dirname "${0}")/../.." && pwd)}"
+LCA_HOME="${LCA_CORE_HOME:-$(cd "$(dirname "${0}")/.." && pwd)}"
 LCA_REGISTRY="${LCA_REGISTRY:-${LCA_HOME}/core/registry.json}"
 LCA_SKILLS="${LCA_SKILLS:-${LCA_HOME}/skills/skills.conf}"
 LCA_MEMORY="${LCA_MEMORY:-${LCA_HOME}/.lca/memory.json}"
@@ -10,7 +10,7 @@ LCA_TIER="${LCA_TIER:-free}"
 LCA_LICENSE="${LCA_LICENSE:-$HOME/.lca/license.json}"
 LCA_GPU="${LCA_GPU:-cpu}"
 
-CHAT=0; FAST=0; DOCTOR=0; UPGRADE=0; LEARN=0; SECURITY=0
+CHAT=0; FAST=0; DOCTOR=0; UPGRADE=0; LEARN=0; SECURITY=0; UNLIMITED=0; PARALLEL=0
 PROMPT=""; EXTRA_RULES=""; USE_MODEL=""; SKILL=""
 MODELS=""; MODELS_ARG=""; SESSIONS=""
 UNLIMITED=0; MEMORY_CMD=""; LICENSE_CMD=""; PARALLEL=0
@@ -334,10 +334,12 @@ memory_inject() {
   [[ -f "${LCA_MEMORY}" ]] || return 0
   local summary
   summary="$(grep -oE '"key":"[^"]*","val":"[^"]*"' "${LCA_MEMORY}" | head -n 12 || true)"
-  [[ -n "${summary}" ]] && MASTER="${MASTER}
+  if [[ -n "${summary}" ]]; then MASTER="${MASTER}
 
 Self-memory (what worked here before):
 ${summary}"
+  fi
+  return 0
 }
 
 memory_list() {
@@ -513,15 +515,15 @@ case "${MODELS}" in
   test)   models_test; exit 0 ;;
 esac
 
-[[ "${SESSIONS}" == "list" ]] && { sessions_list; exit 0; }
-[[ "${SESSIONS}" == "resume" ]] && { sessions_resume || exit 1; }
-[[ "${MEMORY_CMD}" == "list" ]] && { memory_list; exit 0; }
+[[ "${SESSIONS}" == "list" ]] && { sessions_list; exit 0; } || true
+[[ "${SESSIONS}" == "resume" ]] && { sessions_resume || exit 1; } || true
+[[ "${MEMORY_CMD}" == "list" ]] && { memory_list; exit 0; } || true
 if [[ "${MEMORY_CMD}" == "add" ]]; then
   [[ -n "${MEMORY_ARG}" ]] || { echo "usage: lca --memory-add <fact>"; exit 1; }
   memory_note "user" "${MEMORY_ARG}"; echo "✓ stored. (shown on next run)"; exit 0
 fi
-[[ "${LEARN}" -eq 1 ]]    && { detect; learn; exit 0; }
-[[ "${SECURITY}" -eq 1 ]] && { security_scan; exit 0; }
+[[ "${LEARN}" -eq 1 ]]    && { detect; learn; exit 0; } || true
+[[ "${SECURITY}" -eq 1 ]] && { security_scan; exit 0; } || true
 
 if [[ -n "${LICENSE_CMD}" ]]; then
   case "${LICENSE_CMD}" in
@@ -570,7 +572,7 @@ if [[ "${DOCTOR}" -eq 1 ]]; then
   echo "  tier: ${LCA_TIER}   gpu: ${LCA_GPU}   termux: ${IS_TERMUX}"
   echo "  cpu: ${CPU_THREADS}   ram_mb: ${RAM_MB}   threads: ${THREADS}"
   echo "  budgets: ctx=${CTX} tok=${TOK} maxit=${MAXIT} ngl=${NGL:-0}"
-  [[ -f "${LCA_HOME}/.lca/profile.json" ]] && echo "  profile: $(grep -oE '"tps": *[0-9]+' "${LCA_HOME}/.lca/profile.json" | head -1 | tr -d ' ')"
+  [[ -f "${LCA_HOME}/.lca/profile.json" ]] && echo "  profile: $(grep -oE '"tps": *[0-9]+' "${LCA_HOME}/.lca/profile.json" | head -1 | tr -d ' ')" || true
   echo "  model: ${USE_MODEL}   skill: ${SKILL:-none}   unlimited: ${UNLIMITED}   parallel: ${PARALLEL}"
   echo "  memory entries: $(grep -oE '"key":' "${LCA_MEMORY}" 2>/dev/null | wc -l)"
   exit 0
