@@ -65,6 +65,7 @@ curl -fsSL "${reg_url:-${core_url}}" -o "${tmp}/registry.new" 2>/dev/null || cp 
 [[ "$(sha256sum "${tmp}/lca_core.new" | awk '{print $1}')" == "${core_sha}" ]] || { echo "core sha mismatch" >&2; exit 1; }
 
 # swap
+[[ -n "${reg_sha}" && "$(sha256sum "${tmp}/registry.new" 2>/dev/null | awk '{print $1}')" == "${reg_sha}" ]] || { echo "registry sha mismatch" >&2; exit 1; }
 cp "${tmp}/lca_core.new" "${LCA_HOME}/core/lca_core"
 cp "${tmp}/registry.new" "${LCA_HOME}/core/registry.json"
 # re-sign the checksum file the launcher checks
