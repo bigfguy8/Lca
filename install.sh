@@ -36,7 +36,7 @@ if [ ! -d "${LCA_SRC}/bin" ] || [ ! -d "${LCA_SRC}/core" ] || [ ! -d "${LCA_SRC}
     BOOTDIR="${LCA_INSTALL_DIR:-$HOME/lca-install}"
     echo "install.sh: no local source — cloning into ${BOOTDIR}…" >&2
     rm -rf "${BOOTDIR}"
-    mkdir -p "${BOOTDIR}"
+    # git clone creates the target dir itself; do NOT mkdir -p first.
     git clone --depth 1 https://github.com/bigfguy8/lca.git "${BOOTDIR}" >&2
     LCA_DIR="${BOOTDIR}"
     LCA_SRC="${BOOTDIR}"

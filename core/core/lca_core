@@ -1,0 +1,746 @@
+#!/usr/bin/env bash
+# lca core v4 (CLOSED-SOURCE — do not edit; see build_core.sh)
+#
+# v4 adds on top of v3:
+#   - skills: --skill <name> routes the task to an open capability pack
+#             (reverse/REA, ghidra, debug, test, security, perf, build)
+#   - auto-repair: a failed tool is retried ONCE with a fix hint (self-healing)
+#   - self-memory: persistent knowledge graph in .lca/memory.json
+#                  (what worked, what failed, file purpose, build/test cmds)
+#   - GPU-first: reads LCA_GPU (set by the launcher) and passes -ngl accordingly
+#   - unlimited: --unlimited removes the token/iteration cap (Pro only, or local)
+#
+# Maintainer rebuild: bash core/build_core.sh
+
+set -eu
+
+# ============================ paths / config =========================
+LCA_HOME="${LCA_CORE_HOME:-$(cd "$(dirname "${0}")/../.." && pwd)}"
+LCA_REGISTRY="${LCA_REGISTRY:-${LCA_HOME}/core/registry.json}"
+LCA_SKILLS="${LCA_SKILLS:-${LCA_HOME}/skills/skills.conf}"
+LCA_MEMORY="${LCA_MEMORY:-${LCA_HOME}/.lca/memory.json}"
+LCA_SESSIONS="${LCA_SESSIONS:-${LCA_HOME}/.lca/sessions.jsonl}"
+LCA_TIER="${LCA_TIER:-free}"
+LCA_LICENSE="${LCA_LICENSE:-$HOME/.lca/license.json}"
+LCA_GPU="${LCA_GPU:-cpu}"
+
+# ============================ arg parse =================================
+CHAT=0; FAST=0; DOCTOR=0; UPGRADE=0; LEARN=0; SECURITY=0
+PROMPT=""; EXTRA_RULES=""; USE_MODEL=""; SKILL=""
+MODELS=""; MODELS_ARG=""; SESSIONS=""
+UNLIMITED=0; MEMORY_CMD=""; LICENSE_CMD=""; PARALLEL=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --chat)     CHAT=1; shift ;;
+    --fast)     FAST=1; shift ;;
+    --doctor)   DOCTOR=1; shift ;;
+    --upgrade)  UPGRADE=1; shift ;;
+    --learn)    LEARN=1; shift ;;
+    --security) SECURITY=1; shift ;;
+    --unlimited) UNLIMITED=1; shift ;;
+    --parallel)  PARALLEL=1; shift ;;
+    --extra)    EXTRA_RULES="$2"; shift 2 ;;
+    --rules)    EXTRA_RULES="$(cat "$2" 2>/dev/null || echo "$2")"; shift 2 ;;
+    --model)    USE_MODEL="$2"; shift 2 ;;
+    --skill)    SKILL="$2"; shift 2 ;;
+    --models)   MODELS="list"; shift ;;
+    --sessions) SESSIONS="list"; shift ;;
+    --resume)   SESSIONS="resume"; shift ;;
+    --memory)   MEMORY_CMD="list"; shift ;;
+    --memory-add) MEMORY_CMD="add"; MEMORY_ARG="$2"; shift 2 ;;
+    --license)  LICENSE_CMD="show"; shift ;;
+    --license-new) LICENSE_CMD="new"; LICENSE_EMAIL="$2"; shift 2 ;;
+    --license-verify) LICENSE_CMD="verify"; shift ;;
+    models)
+      shift
+      case "${1:-}" in
+        add) MODELS="add" ;;
+        remove) MODELS="remove"; MODELS_ARG="${2:-}"; shift ;;
+        use) MODELS="use"; MODELS_ARG="${2:-}"; shift ;;
+        test) MODELS="test"; MODELS_ARG="${2:-}"; shift ;;
+        list|*) MODELS="list" ;;
+      esac ;;
+    -h|--help)
+      cat <<'EOF'
+ lca — local code agent v5 (cross-platform)
+  lca "prompt"                one-shot tool loop
+  lca --chat                  REPL
+  lca --doctor                system report (incl. GPU)
+  lca --fast "prompt"         auto-pick cheapest model that fits
+  lca --skill <name> "p"     route to a capability pack
+                               (reverse|ghidra|debug|test|security|perf|build|fuzz|ctf|docker|ml)
+   lca --unlimited "prompt"   no token/iteration cap (Pro, or local-only)
+   lca --parallel "prompt"   run multiple tools per turn (Pro)
+   lca --learn                 benchmark + auto-tune budgets
+   lca --security              scan CWD for secrets / sinks
+   lca --sessions | --resume   journal / continue last
+   lca --memory | --memory-add <fact>   self-memory graph
+
+license:
+   lca --license               show tier + license status
+   lca --license verify        verify the signed license signature
+   lca --license-new <email>   MAINTAINER: issue a signed Pro license
+
+models:
+   lca models                  list (auto-discovers Ollama/LM Studio when running)
+   lca models add              wizard (live test)
+   lca models remove <id>
+   lca models use <id>
+   lca models test <id>
+
+rules: drop a .lca/rules.md in a project dir — it is auto-appended to the prompt.
+GPU: auto-detected by the launcher (vulkan>metal>cuda>cpu), passed as LCA_GPU.
+env: LCA_TIER=pro LCA_LICENSE=...   Pro unlocks cloud + unlimited + parallel.
+EOF
+      exit 0 ;;
+    *) PROMPT="$1"; shift ;;
+  esac
+done
+
+# ============================ tier gate =================================
+# A signed Pro license is a JSON line:
+#   {"tier":"pro","email":"...","issued":"...","expires":"...","sig":"<sha256 of the rest>"}
+# "the rest" = the same JSON with the sig field removed. This lets us verify
+# offline, without calling any server, by recomputing the hash.
+license_signature() {  # $1 = the license json WITHOUT the sig line
+  printf '%s' "$1" | sha256sum | awk '{print $1}'
+}
+license_verify() {     # verify the file at LCA_LICENSE; echo ok/bad
+  [[ -f "${LCA_LICENSE}" ]] || { echo "no license file (${LCA_LICENSE})"; return 1; }
+  # The license file is a single JSON line:  {..body..,"sig":"<64hex>"}
+  # "body" = everything before the sig field. Strip via sed.
+  local body hash actual
+  # body = the JSON object WITHOUT the "sig" field, exactly as signed.
+  body="$(grep -oE '^\{.*"sig"' "${LCA_LICENSE}" | head -1 | sed -E 's/,"sig" *$//')"
+  hash="$(grep -oE '"sig": *"[a-f0-9]{64}"' "${LCA_LICENSE}" | grep -oE '[a-f0-9]{64}' | head -1 || true)"
+  [[ -n "${body}" ]] || body="$(cat "${LCA_LICENSE}")"
+  actual="$(license_signature "${body}")"
+  [[ -n "${hash}" && "${hash}" == "${actual}" ]] || { echo "license signature INVALID"; return 1; }
+  local exp
+  exp="$(grep -oE '"expires": *"[^"]*"' "${LCA_LICENSE}" | sed -E 's/.*expires": *"//; s/"//' || true)"
+  if [[ -n "${exp}" && "${exp}" != "lifetime" ]] && [[ -n "$(date -d "${exp}" +%s 2>/dev/null)" ]]; then
+    [[ "$(date +%s)" -lt "$(date -d "${exp}" +%s)" ]] || { echo "license EXPIRED (${exp})"; return 1; }
+  fi
+  echo "license OK"
+}
+
+tier_ok() {
+  case "$1" in
+    free) return 0 ;;
+    pro)
+      [[ -f "${LCA_LICENSE}" ]] || { echo "pro tier needs a license file" >&2; return 1; }
+      license_verify >/dev/null 2>&1 || { license_verify; return 1; }
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ============================ license sub-commands =====================
+license_show() {
+  echo "=== lca license ==="
+  echo "  current tier : ${LCA_TIER}"
+  echo "  license file : ${LCA_LICENSE}"
+  if [[ -f "${LCA_LICENSE}" ]]; then
+    echo "  license json : $(cat "${LCA_LICENSE}")"
+    license_verify || true
+    echo "  unlock       : pro → cloud models, --unlimited, --parallel"
+  else
+    echo "  (no license — running as ${LCA_TIER}); get a signed license with: lca --license-new <email>"
+  fi
+}
+license_verify_cmd() {
+  license_verify || return 1
+  echo "✓ license signature valid (offline, no server)"
+}
+# MAINTAINER ONLY: issue a signed Pro license for an email.
+license_new() {
+  local email="${LICENSE_EMAIL:-}"; [[ -n "${email}" ]] || { echo "usage: lca --license-new <email>"; return 1; }
+  local issued exp sigline
+  issued="$(date -u +%Y-%m-%d)"
+  # expiry: +365 days. GNU date supports -d; fall back to a fixed string.
+  exp="$(date -u -d "+365 days" +%Y-%m-%d 2>/dev/null || echo "lifetime")"
+  sigline="$(printf '{"tier":"pro","email":"%s","issued":"%s","expires":"%s"}' "${email}" "${issued}" "${exp}")"
+  local sig; sig="$(license_signature "${sigline}")"
+  mkdir -p "${LCA_HOME}/.lca"
+  printf '%s,"sig":"%s"}\n' "${sigline}" "${sig}" > "${LCA_HOME}/.lca/license.pro"
+  echo "✓ signed Pro license → ${LCA_HOME}/.lca/license.pro (expires ${exp})"
+  echo "  activate: LCA_LICENSE=${LCA_HOME}/.lca/license.pro LCA_TIER=pro lca ..."
+}
+
+# ============================ system detect (GPU-first) ===============
+detect() {
+  IS_TERMUX=0
+  command -v termux-info >/dev/null 2>&1 && IS_TERMUX=1
+  if command -v nproc >/dev/null 2>&1; then CPU_THREADS="$(nproc 2>/dev/null || echo 4)"; else CPU_THREADS=4; fi
+  RAM_MB=4096
+  [[ -f /proc/meminfo ]] && RAM_MB="$(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo)"
+  [[ "${RAM_MB}" -lt 512 ]] && RAM_MB=512
+  if   (( RAM_MB < 3000 )); then CTX=2048; TOK=256; MAXIT=3; THREADS=2
+  elif (( RAM_MB < 6000 )); then CTX=4096; TOK=512; MAXIT=4; THREADS=4
+  elif (( RAM_MB < 12000)); then CTX=8192; TOK=1024; MAXIT=6; THREADS=4
+  else                            CTX=16384; TOK=2048; MAXIT=8; THREADS=8
+  fi
+  # GPU-first: a capable GPU lets us raise the context + token budget.
+  case "${LCA_GPU}" in
+    vulkan|metal|cuda)
+      # GPU offload: -ngl high, and we can afford a bigger ctx.
+      NGL=99
+      CTX=$(( CTX * 2 ))
+      [[ "${LCA_TIER}" == "pro" ]] && { TOK=$(( TOK * 2 )); MAXIT=$(( MAXIT + 2 )); }
+      ;;
+    cpu) NGL=0 ;;
+  esac
+  # Pro tier (CPU) gets bigger budgets too
+  [[ "${LCA_TIER}" == "pro" ]] && { TOK=$(( TOK * 2 )); MAXIT=$(( MAXIT + 2 )); }
+  # unlimited flag (Pro, or free when using a local model)
+  if [[ "${UNLIMITED}" -eq 1 ]]; then
+    if [[ "${LCA_TIER}" == "pro" ]] && tier_ok pro 2>/dev/null; then
+      TOK=8192; MAXIT=32; CTX=$(( CTX * 2 ))
+    elif [[ "${USE_MODEL:-auto}" == "auto" ]]; then
+      # free + local: allow a big budget (no cloud cost)
+      TOK=4096; MAXIT=16
+    else
+      echo "--unlimited on cloud needs Pro. Using the standard budget." >&2
+    fi
+  fi
+  # parallel flag is Pro: verify the license once, here
+  if [[ "${PARALLEL}" -eq 1 ]] && ! { [[ "${LCA_TIER}" == "pro" ]] && tier_ok pro 2>/dev/null; }; then
+    PARALLEL=0; echo "--parallel is a Pro feature; using single-tool mode (run lca --license)" >&2
+  fi
+  # load a learned profile if present
+  if [[ -f "${LCA_HOME}/.lca/profile.json" ]]; then
+    CTX="$(grep -oE '"ctx": *[0-9]+' "${LCA_HOME}/.lca/profile.json" | grep -oE '[0-9]+' | head -1 || echo "${CTX}")"
+    TOK="$(grep -oE '"tok": *[0-9]+' "${LCA_HOME}/.lca/profile.json" | grep -oE '[0-9]+' | head -1 || echo "${TOK}")"
+    MAXIT="$(grep -oE '"maxit": *[0-9]+' "${LCA_HOME}/.lca/profile.json" | grep -oE '[0-9]+' | head -1 || echo "${MAXIT}")"
+  fi
+}
+
+# ============================ model registry =========================
+model_for_id() {
+  local id="$1"
+  [[ -f "${LCA_REGISTRY}" ]] || { echo "registry not found: ${LCA_REGISTRY}" >&2; return 1; }
+  API=""; MODEL=""; BASE=""; KEYVAR=""
+  if [[ "${id}" == "auto" || -z "${id}" ]]; then
+    for cand in /sdcard/download/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+                /sdcard/download/qwen*.gguf /sdcard/download/*.gguf; do
+      [[ -f "${cand}" ]] && { MODEL="${cand}"; API="llama"; CLI="${LCA_CLI:-}"; return 0; }
+    done
+    echo "no local model. Pass --model <id> or run: lca models add" >&2; return 1
+  fi
+  line="$(grep -E "\"id\": *\"${id}\"" "${LCA_REGISTRY}" | head -1 || true)"
+  [[ -n "${line}" ]] || { echo "unknown model id: ${id} (run: lca models list)" >&2; return 1; }
+  API="$(printf '%s' "${line}"  | grep -oE '"api": *"[a-z]+"'   | cut -d'"' -f4 || true)"
+  MODEL="$(printf '%s' "${line}" | grep -oE '"model": *"[^"]*"' | cut -d'"' -f4 || true)"
+  BASE="$(printf '%s' "${line}"  | grep -oE '"base": *"[^"]*"'  | cut -d'"' -f4 || true)"
+  KEYVAR="$(printf '%s' "${line}" | grep -oE '"key": *"[^"]*"'  | cut -d'"' -f4 || true)"
+  if [[ -n "${KEYVAR}" && -z "${!KEYVAR:-}" ]]; then
+    echo "model '${id}' needs env ${KEYVAR}" >&2; return 1
+  fi
+  if [[ "${API}" == "llama" ]]; then CLI="${LCA_CLI:-}"; return 0; fi
+  OPENAI_API="${!KEYVAR:-}"
+  OPENAI_BASE="${BASE:-https://api.openai.com/v1}"
+  return 0
+}
+
+# ============================ ask =====================================
+ask() {
+  _sys="$1"; _user="$2"
+  case "${API:-llama}" in
+    llama)
+      [[ -n "${CLI}" && -x "${CLI}" ]] || {
+        for cand in "${LCA_HOME}/llama.cpp/build/bin/llama-cli" \
+                    /data/data/com.termux/files/home/llama.cpp/build/bin/llama-cli \
+                    /usr/local/bin/llama-cli; do
+          [[ -x "${cand}" ]] && { CLI="${cand}"; break; }
+        done
+        command -v llama-cli >/dev/null 2>&1 && CLI="$(command -v llama-cli)"
+      }
+      [[ -n "${CLI}" && -x "${CLI}" ]] || { echo "llama-cli not found" >&2; return 1; }
+      _pf="$(mktemp)"
+      printf '%s\n' "${_sys}
+${_user}" > "${_pf}"
+      sh "${CLI}" \
+        -m "${MODEL}" -ngl "${NGL:-0}" -c "${CTX}" -n "${TOK}" -t "${THREADS}" \
+        --temp 0.0 --repeat_penalty 1.15 \
+        < "${_pf}" 2>/dev/null
+      rm -f "${_pf}" ;;
+    openai)
+      [[ -n "${OPENAI_API:-}" ]] || { echo "no API key (set ${KEYVAR:-OPENAI_API_KEY})" >&2; return 1; }
+      _json="$(printf '{"model":"%s","messages":[{"role":"system","content":"%s"},{"role":"user","content":"%s"}],"max_tokens":%s,"temperature":0.0}' \
+              "${MODEL}" "$(printf '%s' "${_sys}" | sed 's/"/\\"/g')" "$(printf '%s' "${_user}" | sed 's/"/\\"/g')" "${TOK}")"
+      curl -sS -X POST "${OPENAI_BASE:-https://api.openai.com/v1}/chat/completions" \
+        -H "Authorization: Bearer ${OPENAI_API}" -H "Content-Type: application/json" \
+        -d "${_json}" \
+        | grep -oE '"content":"[^"]*"' | head -1 | cut -d'"' -f4 | sed 's/\\n/\n/g' ;;
+    *) echo "unknown API: ${API}" >&2; return 1 ;;
+  esac
+}
+
+# ============================ master prompt =========================
+BASE_MASTER="You are a coding agent on a phone. Be terse.
+Each turn output exactly ONE line:
+  TOOL arg
+Tools:
+  ls <path>
+  cat <file>          (first 200 lines)
+  grep <pattern>
+  write <path>|<content>    (content ONE line, no newlines; max 16KB)
+  writef <path>|<base64>    (multi-line safe: base64 content)
+  shell <cmd>          (no pipes, no redirects, no sudo)
+  done
+Rules: 1 tool per turn. Short files. When finished: done"
+
+MASTER="${BASE_MASTER}"
+[[ -n "${EXTRA_RULES}" ]] && MASTER="${MASTER}
+
+User rules:
+${EXTRA_RULES}"
+
+# ---- parallel mode (Pro): the model may emit several tool lines at once --
+if [[ "${PARALLEL}" -eq 1 ]]; then
+  MASTER="${MASTER}
+
+PARALLEL MODE: You may output up to 3 independent tool lines in one turn
+(only ones that do NOT depend on each other's output, e.g. three cat/grep).
+If a result depends on a previous tool, keep it to ONE line this turn.
+Independent lines can be grouped:
+  cat a.txt
+  cat b.txt
+  grep x c.txt"
+fi
+
+# ============================ skills ==================================
+load_skill() {
+  local name="$1"
+  [[ -f "${LCA_SKILLS}" ]] || { echo "skills.conf not found" >&2; return 1; }
+  # extract the [skill.<name>] block
+  local block
+  block="$(awk "/^\[skill\.${name}\]/{f=1;next} /^\[skill\./{f=0} f" "${LCA_SKILLS}")"
+  [[ -n "${block}" ]] || { echo "unknown skill: ${name} (see skills.conf)" >&2; return 1; }
+  local sprompt
+  sprompt="$(printf '%s' "${block}" | grep '^prompt' | sed 's/^prompt *= *//' | tr -d '"' )"
+  local sbin
+  sbin="$(printf '%s' "${block}" | grep '^binaries' | cut -d= -f2 | tr -d ' "' || true)"
+  # check the binaries are present (warn, don't hard-fail)
+  if [[ -n "${sbin}" ]]; then
+    for b in ${sbin}; do
+      if ! command -v "${b}" >/dev/null 2>&1; then
+        echo "⚠ skill '${name}' wants '${b}' which is not installed (still continuing with what's available)" >&2
+      fi
+    done
+  fi
+  MASTER="${MASTER}
+
+Skill: ${name}
+${sprompt}"
+  return 0
+}
+
+# ============================ self-memory ============================
+# memory.json is a JSON array of facts: {"key":..., "val":..., "ts":...}
+# Use python3 for JSON safety; fall back to a line-append if python3 is missing.
+memory_note() {
+  local key="$1" val="$2" ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$(dirname "${LCA_MEMORY}")"
+  [[ -f "${LCA_MEMORY}" ]] || echo "[]" > "${LCA_MEMORY}"
+  val="${val:0:200}"
+  # JSON-escape the value (backslash, double-quote)
+  val="${val//\\/\\\\}"; val="${val//\"/\\\"}"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${LCA_MEMORY}" "${key}" "${val}" "${ts}" <<'PY'
+import json, sys
+path, key, val, ts = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    with open(path) as f: arr = json.load(f)
+    if not isinstance(arr, list): arr = []
+except Exception:
+    arr = []
+# upsert: drop any entry with the same key, append new
+arr = [e for e in arr if e.get("key") != key]
+arr.append({"key": key, "val": val, "ts": ts})
+with open(path, "w") as f: json.dump(arr, f, indent=1)
+PY
+  else
+    # POSIX fallback: rewrite the array line-by-line
+    local tmp="${LCA_MEMORY}.tmp"
+    : > "${tmp}"
+    printf '[\n' >> "${tmp}"
+    local first=1
+    while IFS= read -r line; do
+      case "${line}" in
+        "\]"*) : ;;  # skip the closing bracket; we rewrite it
+        "") : ;;
+        *)
+          # skip entries with the same key
+          case "${line}" in
+            *"\"key\":\"${key}\""*) continue ;;
+          esac
+          if [ "${first}" -eq 1 ]; then first=0; else printf ',\n' >> "${tmp}"; fi
+          printf '%s' "${line}" >> "${tmp}"
+          ;;
+      esac
+    done < "${LCA_MEMORY}"
+    printf ',\n' >> "${tmp}"
+    printf '  {"key":"%s","val":"%s","ts":"%s"}\n' "${key}" "${val}" "${ts}" >> "${tmp}"
+    printf ']\n' >> "${tmp}"
+    mv "${tmp}" "${LCA_MEMORY}"
+  fi
+}
+
+memory_inject() {
+  # return a compact summary of memory to append to the master prompt
+  [[ -f "${LCA_MEMORY}" ]] || return 0
+  local summary
+  summary="$(grep -oE '"key":"[^"]*","val":"[^"]*"' "${LCA_MEMORY}" | head -n 12 || true)"
+  [[ -n "${summary}" ]] && MASTER="${MASTER}
+
+Self-memory (what worked here before):
+${summary}"
+}
+
+memory_list() {
+  [[ -f "${LCA_MEMORY}" ]] || { echo "no memory yet"; return 0; }
+  echo "── self-memory ──"
+  grep -oE '"key":"[^"]*","val":"[^"]*"' "${LCA_MEMORY}" | sed 's/^/  /' || echo "  (empty)"
+}
+
+# ============================ auto-repair ===========================
+# run a tool; if it fails, retry ONCE with a fix hint. Returns combined obs.
+run_tool_smart() {
+  local line="$1"
+  local out out2
+  out="$(lca_run_tool "${line}" 2>&1 || true)"
+  case "${out}" in
+    *Refusing*|*failed*|*"not found"*|*"No such file"*)
+      echo "  (auto-repair: retrying with a fix hint)" >&2
+      local repaired="${line}   # auto-repair hint: check the path/arg exists; quote args; try an alternative"
+      out2="$(lca_run_tool "${repaired}" 2>&1 || true)"
+      case "${out2}" in
+        *Refusing*|*failed*)
+          memory_note "failed_tool" "${line}"
+          printf '%s\n[repair attempt: %s]' "${out}" "${out2}"
+          return 1 ;;
+        *)
+          memory_note "repaired_tool" "${line}"
+          printf '%s' "${out2}"
+          return 0 ;;
+      esac ;;
+    *)
+      printf '%s' "${out}"
+      return 0 ;;
+  esac
+}
+
+# ============================ sessions ==============================
+sessions_log() {
+  mkdir -p "$(dirname "${LCA_SESSIONS}")"
+  printf '{"ts":"%s","model":"%s","skill":"%s","prompt":"%s","tools":"%s","verdict":"%s","gpu":"%s","secs":%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${MODEL:-auto}" "${SKILL:-none}" \
+    "$(printf '%s' "${PROMPT}" | sed 's/"/\\"/g' | head -c 200)" \
+    "${2:-}" "${1:-unknown}" "${LCA_GPU}" "${_SECS:-0}" >> "${LCA_SESSIONS}"
+}
+sessions_list() {
+  [[ -f "${LCA_SESSIONS}" ]] || { echo "no sessions yet"; return 0; }
+  echo "── recent sessions ──"
+  tail -n 10 "${LCA_SESSIONS}"
+}
+sessions_resume() {
+  [[ -f "${LCA_SESSIONS}" ]] || { echo "no sessions yet"; return 1; }
+  last="$(tail -n 1 "${LCA_SESSIONS}")"
+  last_prompt="$(printf '%s' "${last}" | grep -oE '"prompt":"[^"]*' | cut -d'"' -f4 | sed 's/^"//')"
+  last_skill="$(printf '%s' "${last}" | grep -oE '"skill":"[^"]*' | cut -d':' -f2 | sed 's/^"//')"
+  echo "last session: '${last_prompt}' [skill: ${last_skill:-none}]"
+  PROMPT="Continue from last session. Last prompt: ${last_prompt}. Skill: ${last_skill:-none}. What still needs doing?"
+  [[ -n "${last_skill}" && "${last_skill}" != "none" ]] && SKILL="${last_skill}"
+  return 0
+}
+
+# ============================ learn =================================
+learn() {
+  detect
+  USE_MODEL="${USE_MODEL:-$(cat "${LCA_HOME}/.lca/default_model" 2>/dev/null || echo auto)}"
+  model_for_id "${USE_MODEL}" || { echo "cannot benchmark: no model"; return 1; }
+  echo "benchmarking ${USE_MODEL} on ${LCA_GPU}…"
+  t_start="$(date +%s)"
+  ask "Write a one-line haiku." "haiku" >/dev/null 2>&1 || true
+  t_end="$(date +%s)"; wall=$(( t_end - t_start )); [[ ${wall} -le 0 ]] && wall=1
+  tps=$(( 40 / wall )); [[ ${tps} -le 0 ]] && tps=1
+  target_turn=20
+  tok=$(( target_turn * tps )); (( tok < 128 )) && tok=128; (( tok > 4096 )) && tok=4096
+  ctx=$(( RAM_MB / 4 )); (( ctx < 2048 )) && ctx=2048; (( ctx > 16384 )) && ctx=16384
+  maxit=$(( 200 / (tok / 64) )); (( maxit < 3 )) && maxit=3; (( maxit > 16 )) && maxit=16
+  mkdir -p "${LCA_HOME}/.lca"
+  printf '{\n  "model": "%s","gpu":"%s","tps": %s,"ctx": %s,"tok": %s,"maxit": %s,"learned": "%s"\n}\n' \
+    "${USE_MODEL}" "${LCA_GPU}" "${tps}" "${ctx}" "${tok}" "${maxit}" "$(date -u +%Y-%m-%d)" > "${LCA_HOME}/.lca/profile.json"
+  memory_note "device_profile" "gpu=${LCA_GPU} tps=${tps} ctx=${ctx} tok=${tok} maxit=${maxit}"
+  echo "✓ profile saved: ${tps} tok/s on ${LCA_GPU} → ctx=${ctx} tok=${tok} maxit=${maxit}"
+}
+
+# ============================ security scan =========================
+security_scan() {
+  echo "── security scan of $(pwd) ──"
+  findings=0
+  check() {
+    hits="$(grep -rInE "$2" --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=build --exclude-dir=.lca . 2>/dev/null | head -n 5 || true)"
+    if [[ -n "${hits}" ]]; then
+      echo "  ⚠ $1:"; printf '%s\n' "${hits}" | sed 's/^/      /'; findings=$(( findings + 1 ))
+    fi
+  }
+  check "hardcoded secrets" '(api[_-]?key|token|secret|password)[[:space:]]*=[[:space:]]*['"'"'"][A-Za-z0-9_\-]{8,}['"'"'"]'
+  check "eval / exec" 'eval\(|exec\(|child_process\.exec'
+  check "SQL from strings" 'SELECT .* \+|INSERT .* \+|query\(.*\+'
+  check "shell injection" 'os\.system|subprocess\.call\(.*shell'
+  check "disabled TLS" 'verify=False|InsecureSkipVerify'
+  check "open CORS" 'Access-Control-Allow-Origin.*\*'
+  check "weak hash" 'md5\(|sha1\('
+  if (( findings == 0 )); then echo "  ✓ no common sinks found"; else
+    echo "  ${findings} finding(s). Mark safe ones with a 'lca: ignore-security' comment."
+    memory_note "security_findings" "${findings}"
+  fi
+}
+
+# ============================ local service discovery =================
+# Probe common Ollama / LM Studio ports; report what's serving, and offer to register.
+discover_local() {
+  echo "  scanning local OpenAI-compatible endpoints ..."
+  _found=0
+  for spec in "ollama|http://127.0.0.1:11434/v1" "lmstudio|http://127.0.0.1:1234/v1"; do
+    name="$(printf '%s' "${spec}" | cut -d'|' -f1)"
+    url="$(printf '%s' "${spec}" | cut -d'|' -f2)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "${url}/models" 2>/dev/null || echo 000)"
+    case "${code}" in
+      2*)
+        _found=1
+        echo "  ✓ ${name} live at ${url}  (id: ${name})"
+        # register it automatically if not already present
+        if ! grep -qE "\"${name}\": *{" "${LCA_REGISTRY}" 2>/dev/null; then
+          echo "  …registering '${name}' in the registry"
+          lb="$(grep -n '^}' "${LCA_REGISTRY}" | tail -1 | cut -d: -f1)"
+          sed -i "$(( lb ))i   \"${name}\": {\"id\":\"${name}\",\"api\":\"openai\",\"base\":\"${url}\",\"model\":\"local\"}," "${LCA_REGISTRY}"
+        fi
+        ;;
+      *) : ;;   # not running
+    esac
+  done
+  [[ ${_found} -eq 0 ]] && echo "  (no local Ollama/LM Studio found; start one to auto-discover)"
+}
+
+# ============================ models add wizard =====================
+models_add() {
+  detect
+  echo "=== lca models add ==="
+  echo "Providers: llama (local GGUF) or openai-compatible (groq/openrouter/openai/anthropic/ollama/lmstudio)"
+  read -r -p "  provider [llama]: " prov; prov="${prov:-llama}"
+  read -r -p "  id (short name): " mid; [[ -n "${mid}" ]] || { echo "no id; abort."; return 1; }
+  if [[ "${prov}" == "llama" ]]; then
+    read -r -p "  GGUF path: " mpath
+    [[ -f "${mpath}" ]] || { echo "file not found: ${mpath}"; return 1; }
+    new_line="  \"${mid}\": {\"id\":\"${mid}\",\"api\":\"llama\",\"model\":\"${mpath}\"},"
+  else
+    read -r -p "  base URL [https://api.openai.com/v1]: " mbase; mbase="${mbase:-https://api.openai.com/v1}"
+    read -r -p "  model id: " mname; [[ -n "${mname}" ]] || { echo "no model name; abort."; return 1; }
+    read -r -p "  key env var [OPENAI_API_KEY]: " mkey; mkey="${mkey:-OPENAI_API_KEY}"
+    new_line="  \"${mid}\": {\"id\":\"${mid}\",\"api\":\"openai\",\"base\":\"${mbase}\",\"model\":\"${mname}\",\"key\":\"${mkey}\"},"
+  fi
+  echo; echo "Live test — asking the model to answer 'ping': "
+  scratch="$(mktemp)"; cp "${LCA_REGISTRY}" "${scratch}"
+  LCA_REGISTRY="${scratch}"
+  if model_for_id "${mid}"; then
+    out="$(ask "Answer with exactly one word: ping" "ping" 2>&1 || true)"
+    echo "  model answered: ${out:-<no reply>}"
+    rm -f "${scratch}"
+    [[ -n "${out}" ]] || { echo "test failed — not saving."; return 1; }
+  fi
+  lastbrace_line="$(grep -n '^}' "${LCA_REGISTRY}" | tail -1 | cut -d: -f1)"
+  sed -i "$(( lastbrace_line ))i ${new_line}" "${LCA_REGISTRY}"
+  echo "✓ saved '${mid}'. Set default with: lca models use ${mid}"
+}
+models_remove() {
+  [[ -n "${MODELS_ARG}" ]] || { echo "usage: lca models remove <id>"; return 1; }
+  grep -v "\"id\":\"${MODELS_ARG}\"" "${LCA_REGISTRY}" > "${LCA_REGISTRY}.tmp" || true
+  mv "${LCA_REGISTRY}.tmp" "${LCA_REGISTRY}"; echo "removed '${MODELS_ARG}'"
+}
+models_use() {
+  [[ -n "${MODELS_ARG}" ]] || { echo "usage: lca models use <id>"; return 1; }
+  mkdir -p "${LCA_HOME}/.lca"; echo "${MODELS_ARG}" > "${LCA_HOME}/.lca/default_model"
+  echo "default model set to '${MODELS_ARG}'"
+}
+models_test() {
+  [[ -n "${MODELS_ARG}" ]] || { echo "usage: lca models test <id>"; return 1; }
+  detect; model_for_id "${MODELS_ARG}" || return 1
+  t0="$(date +%s)"; out="$(ask "Reply with the single word: pong" "test" 2>&1 || true)"; t1="$(date +%s)"
+  echo "  ${MODELS_ARG} → '${out}' in $(( t1 - t0 ))s"
+}
+
+# ============================ route sub-commands =====================
+case "${MODELS}" in
+  list)   detect; echo "registered models:"; grep -oE '"id": *"[a-z0-9.-]+"' "${LCA_REGISTRY}" 2>/dev/null | sed 's/^/  /' || echo "  (empty)"; echo "  default: $(cat "${LCA_HOME}/.lca/default_model" 2>/dev/null || echo auto)"; discover_local; echo "  add: lca models add   use: lca models use <id>   test: lca models test <id>"; exit 0 ;;
+  add)    models_add; exit 0 ;;
+  remove) models_remove; exit 0 ;;
+  use)    models_use; exit 0 ;;
+  test)   models_test; exit 0 ;;
+esac
+
+[[ "${SESSIONS}" == "list" ]] && { sessions_list; exit 0; }
+[[ "${SESSIONS}" == "resume" ]] && { sessions_resume || exit 1; }
+[[ "${MEMORY_CMD}" == "list" ]] && { memory_list; exit 0; }
+if [[ "${MEMORY_CMD}" == "add" ]]; then
+  [[ -n "${MEMORY_ARG}" ]] || { echo "usage: lca --memory-add <fact>"; exit 1; }
+  memory_note "user" "${MEMORY_ARG}"; echo "✓ stored. (shown on next run)"; exit 0
+fi
+[[ "${LEARN}" -eq 1 ]]    && { detect; learn; exit 0; }
+[[ "${SECURITY}" -eq 1 ]] && { security_scan; exit 0; }
+
+# ---- license sub-commands (offline verify; no server auth) ----------
+if [[ -n "${LICENSE_CMD}" ]]; then
+  case "${LICENSE_CMD}" in
+    show)   license_show; exit 0 ;;
+    verify) license_verify_cmd; exit $? ;;
+    new)    license_new; exit 0 ;;
+  esac
+fi
+
+# ============================ default model =========================
+detect
+USE_MODEL="${USE_MODEL:-$(cat "${LCA_HOME}/.lca/default_model" 2>/dev/null || echo auto)}"
+if [[ "${FAST}" -eq 1 ]]; then
+  if [[ "${LCA_TIER}" == "pro" ]] && tier_ok pro 2>/dev/null; then USE_MODEL="groq"; else USE_MODEL="auto"; fi
+fi
+model_for_id "${USE_MODEL}" || exit 1
+
+# ============================ skill + memory + rules ================
+[[ -n "${SKILL}" ]] && load_skill "${SKILL}"
+memory_inject
+
+# ---- per-project rules: .lca/rules.md is auto-appended to the prompt ---
+# Look in the CWD first (the project you're in), then the global .lca/rules.md.
+for _r in "./.lca/rules.md" "${LCA_HOME}/.lca/rules.md"; do
+  if [[ -f "${_r}" ]]; then
+    _rc="$(head -c 2000 "${_r}" 2>/dev/null)"
+    [[ -n "${_rc}" ]] && EXTRA_RULES="${EXTRA_RULES}
+== project rules (${_r}) ==
+${_rc}
+== end rules =="
+    echo "[lca] loaded rules: ${_r}" >&2
+  fi
+done
+
+# ============================ tool layer ============================
+LCA_SRC="${LCA_HOME}/src"
+[[ -f "${LCA_SRC}/tools.sh" ]] || { echo "src/tools.sh missing" >&2; exit 1; }
+. "${LCA_SRC}/tools.sh"
+
+# ============================ chat mode =============================
+if [[ "${CHAT}" -eq 1 ]]; then
+  echo "lca chat [${USE_MODEL} ${SKILL:+| skill:${SKILL}}] (Ctrl-D to quit)"
+  while IFS= read -r line; do
+    [[ -z "${line}" ]] && continue
+    out="$(ask "${MASTER}" "${line}")"; printf '%s\n\n' "${out}"
+  done
+  sessions_log "chat" "chat"; exit 0
+fi
+
+# ============================ doctor =================================
+if [[ "${DOCTOR}" -eq 1 ]]; then
+  echo "lca doctor (v5)"
+  echo "  tier: ${LCA_TIER}   gpu: ${LCA_GPU}   termux: ${IS_TERMUX}"
+  echo "  cpu: ${CPU_THREADS}   ram_mb: ${RAM_MB}   threads: ${THREADS}"
+  echo "  budgets: ctx=${CTX} tok=${TOK} maxit=${MAXIT} ngl=${NGL:-0}"
+  [[ -f "${LCA_HOME}/.lca/profile.json" ]] && echo "  profile: $(grep -oE '"tps": *[0-9]+' "${LCA_HOME}/.lca/profile.json" | head -1 | tr -d ' ')"
+  echo "  model: ${USE_MODEL}   skill: ${SKILL:-none}   unlimited: ${UNLIMITED}   parallel: ${PARALLEL}"
+  echo "  memory entries: $(grep -oE '"key":' "${LCA_MEMORY}" 2>/dev/null | wc -l)"
+  exit 0
+fi
+
+# ============================ upgrade ===============================
+if [[ "${UPGRADE}" -eq 1 ]]; then
+  echo "lca: run the updater: lca-update (see bin/lca-update)" >&2; exit 0
+fi
+
+# ============================ tool loop (with auto-repair) =========
+PROMPT="${PROMPT:-What do you want to build?}"
+_uw="${PROMPT}
+
+Workspace: $(pwd)
+Current dir:
+$(ls -la 2>&1 | head -n 30)"
+user_block="${_uw}"
+
+# ---- parallel runner (Pro): collect up to 3 independent tool lines ----
+run_parallel() {
+  local reply="$1"
+  local lines n=0 obsall="" t _lp
+  _lp="$(mktemp)"
+  printf '%s\n' "${reply}" | grep -E '^[a-z]+ ' > "${_lp}" 2>/dev/null || true
+  while IFS= read -r t; do
+    case "${t}" in
+      ls\ *|cat\ *|grep\ *|shell\ *|write\ *|writef\ *)
+        n=$(( n + 1 ))
+        obsall="${obsall}[${n}] ${t} →
+$(run_tool_smart "${t}" || echo "tool failed")
+
+" ;;
+      done*)
+        rm -f "${_lp}"
+        printf 'FINAL\n'
+        return 0 ;;
+    esac
+    (( n >= 3 )) && break
+  done < "${_lp}"
+  rm -f "${_lp}"
+  printf '%s' "${obsall}"
+}
+
+i=0; _tools_used=""; _t0="$(date +%s)"
+while (( i++ < MAXIT )); do
+  echo "── turn ${i}/${MAXIT} [${USE_MODEL}${SKILL:+ skill:${SKILL}}] ──" >&2
+  reply="$(ask "${MASTER}" "${user_block}")"
+  [[ -n "${reply}" ]] || { echo "empty reply; stopping" >&2; break; }
+
+  if [[ "${PARALLEL}" -eq 1 ]]; then
+    obs="$(run_parallel "${reply}" 2>/dev/null)"
+    case "${obs}" in
+      FINAL*) echo "final answer: ${reply}" >&2; _tools_used="${_tools_used}done"; break ;;
+      *) obs="$(printf '%s' "${obs}" | sed 's/^FINAL//' | head -c 2500)" ;;
+    esac
+    _us="${user_block}
+
+[${i}] You: ${reply}
+Obs: ${obs}
+
+Next tool(s) (up to 3 independent lines):"
+    user_block="${_us}"
+    continue
+  fi
+
+  # ---- single-tool mode (Free default) ----
+  tool_line="$(printf '%s\n' "${reply}" | grep -E '^[a-z]+ ' | head -n 1 || true)"
+  if [[ -z "${tool_line}" ]]; then
+    echo "final answer:" >&2; printf '%s\n' "${reply}"
+    _tools_used="${_tools_used}done"; break
+  fi
+  tool="${tool_line%% *}"
+  echo "→ ${tool_line}" >&2
+  _tools_used="${_tools_used}${tool},"
+  [[ "${tool}" == "done" ]] && { echo "done." >&2; break; }
+  obs="$(run_tool_smart "${tool_line}" || echo "tool failed")"
+  obs="$(printf '%s' "${obs}" | head -c 2500)"
+  _us="${user_block}
+
+[${i}] You: ${reply}
+Obs: ${obs}
+
+Next tool (ONE line only):"
+  user_block="${_us}"
+done
+_t1="$(date +%s)"; _SECS=$(( _t1 - _t0 ))
+# remember what worked
+# POSIX-safe truncation (the core runs under sh, so ${var:0:60} is not available)
+_short_prompt="$(printf '%s' "${PROMPT}" | cut -c1-60)"
+memory_note "last_run" "prompt=${_short_prompt} skill=${SKILL:-none} turns=${i} secs=${_SECS}"
+sessions_log "ok" "${_tools_used}"
+echo "── finished at turn ${i} [${USE_MODEL}] in ${_SECS}s ──" >&2
+echo "  logged. Resume: lca --resume   Memory: lca --memory" >&2
+#x
