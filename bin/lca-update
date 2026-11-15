@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# lca update — fetch the latest manifest, verify the signature, swap the core.
+#
+# Free tier: runs at most once a month (rate-limited by a timestamp file).
+# Pro tier:  no rate limit.
+#
+# Usage:  lca --upgrade        (or: lca update)
+#
+# The manifest URL lives in the registry under "update.url". The manifest is
+# signed: sha256 of the manifest body (minus the "sig" line) must equal "sig".
+# The core + registry are downloaded and their SHA256s checked against the
+# manifest before the install.
+
+set -eu
+
+LCA_HOME="${LCA_CORE_HOME:-$(cd "$(dirname "${0}")/../.." && pwd)}"
+REG="${LCA_HOME}/core/registry.json"
+MANIFEST_URL=""
+
+# read update.url from registry.json
+if [[ -f "${REG}" ]]; then
+  MANIFEST_URL="$(grep -oE '"url": *"[^"]+"' "${REG}" | head -1 | cut -d'"' -f4 || true)"
+fi
+[[ -n "${MANIFEST_URL}" ]] || { echo "no update URL in registry.json" >&2; exit 1; }
+
+# tier rate-limit
+LCA_TIER="${LCA_TIER:-free}"
+STAMP="${LCA_HOME}/.lca_last_update"
+now="$(date +%s)"
+if [[ "${LCA_TIER}" == "free" && -f "${STAMP}" ]]; then
+  last="$(cat "${STAMP}")"
+  age=$(( now - last ))
+  # 30 days for free
+  if (( age < 2592000 )); then
+    echo "free tier: last update $(( age / 86400 ))d ago; next allowed in $(( (2592000 - age) / 86400 ))d"
+    echo "(Pro tier removes this limit. Set LCA_TIER=pro + license.)"
+    exit 0
+  fi
+fi
+
+# fetch manifest
+tmp="$(mktemp -d)"
+trap 'rm -rf "${tmp}"' EXIT
+curl -fsSL "${MANIFEST_URL}" -o "${tmp}/manifest.json" || { echo "fetch failed" >&2; exit 1; }
+
+# verify sig: sha256 of manifest minus the sig line == sig
+body="$(grep -v '"sig"' "${tmp}/manifest.json" || true)"
+expected="$(grep -oE '"sig": *"[a-f0-9]{64}"' "${tmp}/manifest.json" | grep -oE '[a-f0-9]{64}' | head -1)"
+actual="$(printf '%s' "${body}" | sha256sum | awk '{print $1}')"
+[[ -n "${expected}" && "${expected}" == "${actual}" ]] || { echo "manifest sig mismatch" >&2; exit 1; }
+
+core_sha="$(grep -oE '"core_sha256": *"[a-f0-9]{64}"' "${tmp}/manifest.json" | grep -oE '[a-f0-9]{64}' | head -1)"
+reg_sha="$(grep -oE '"registry_sha256": *"[a-f0-9]{64}"' "${tmp}/manifest.json" | grep -oE '[a-f0-9]{64}' | head -1)"
+
+# the manifest also points to where the core + registry binaries live
+core_url="$(grep -oE '"core_url": *"[^"]+"' "${tmp}/manifest.json" | head -1 | cut -d'"' -f4 || true)"
+reg_url="$(grep -oE '"registry_url": *"[^"]+"' "${tmp}/manifest.json" | head -1 | cut -d'"' -f4 || true)"
+
+[[ -n "${core_url}" ]] || { echo "manifest missing core_url" >&2; exit 1; }
+curl -fsSL "${core_url}" -o "${tmp}/lca_core.new"
+curl -fsSL "${reg_url:-${core_url}}" -o "${tmp}/registry.new" 2>/dev/null || cp "${LCA_HOME}/core/registry.json" "${tmp}/registry.new"
+
+# verify downloads
+[[ "$(sha256sum "${tmp}/lca_core.new" | awk '{print $1}')" == "${core_sha}" ]] || { echo "core sha mismatch" >&2; exit 1; }
+
+# swap
+cp "${tmp}/lca_core.new" "${LCA_HOME}/core/lca_core"
+cp "${tmp}/registry.new" "${LCA_HOME}/core/registry.json"
+# re-sign the checksum file the launcher checks
+printf '%s  lca_core\n' "$(sha256sum "${LCA_HOME}/core/lca_core" | awk '{print $1}')" > "${LCA_HOME}/core/lca_core.sha256"
+
+date +%s > "${STAMP}"
+echo "updated to $(grep -oE '"version": *"[^"]+"' "${tmp}/manifest.json" | head -1 | cut -d'"' -f4)"

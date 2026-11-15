@@ -1,0 +1,17 @@
+LCA NOTICE
+==========
+
+bin/, src/, install.sh       — MIT (see LICENSE)
+core/lca_core                — PROPRIETARY, closed source
+core/lca_core.sha256         — integrity gate for the closed core
+core/build_core.sh           — maintainer recipe (obfuscate + checksum)
+
+The distributed core/lca_core is shipped obfuscated. The launcher (bin/lca)
+verifies its SHA256 before execution; if the bytes were modified, lca refuses
+to start and points you to build_core.sh to re-sign.
+
+Do not reverse-engineer, de-obfuscate, or redistribute the obfuscated core in
+modified form. Rebuilding is permitted only via build_core.sh with the
+maintainer's original readable source.
+
+Questions: see README.md.

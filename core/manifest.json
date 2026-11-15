@@ -1,0 +1,10 @@
+{
+  "version": "5.0.0",
+  "released": "2026-11-15",
+  "core_sha256": "2478c06bb6a091e823201ef4362454dbb63c081369ae933c5479669734b73a46",
+  "registry_sha256": "71c6574d0c1936fdba11d36025a0546a9dcc585a97a0825261b6d784d8124599",
+  "core_url": "https://raw.githubusercontent.com/<YOUR_USER>/lca/main/core/lca_core",
+  "registry_url": "https://raw.githubusercontent.com/<YOUR_USER>/lca/main/core/registry.json",
+  "update": {"url": "https://raw.githubusercontent.com/<YOUR_USER>/lca/main/core/manifest.json"}
+  "sig": "52b7608292f978de4216c7baecb433242073612fb60f5edd3be85d702699cdf0"
+}

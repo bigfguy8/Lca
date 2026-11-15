@@ -1,0 +1,6 @@
+#!/system/bin/sh
+# fake llama-cli: prints a canned tool-call sequence, then "done"
+canned="ls .
+cat hello.txt
+done"
+printf '%s\n' "${canned}"
