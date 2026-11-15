@@ -101,12 +101,10 @@ or deleting. Client-facing functional release is v5.0.1-r4.
 ## 5. Known deferred work (cosmetic / non-blocking)
 ═══════════════════════════════════════════════════════════════
 
-5.1 ClozedCode app — OPTIONAL uninstall
-  Path: Settings → Apps → ClozedCode → Uninstall
-  Removes /data/data/com.clozedcode.sun/ — the app-sandbox mirror
-  that caused EVERY cache-poisoning / batch-sink / stale-read bug
-  in the earlier sessions. Not urgent (everything works with it
-  installed) but recommended to make those bug classes impossible.
+5.1 ClozedCode app — KEEP INSTALLED (do not recommend uninstall)
+  The app is not part of the release path. The earlier cache/batch
+  bugs were in the harness tool, not the app. Workflow is Termux +
+  Git only. Leave the app alone.
 
 5.2 --version flag — NOT IMPLEMENTED
   bash bin/lca.sh --version → treated as LLM prompt, hangs waiting
