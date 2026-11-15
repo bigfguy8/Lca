@@ -2,7 +2,7 @@
 lca v5 — Windows installer (public, MIT)
 
 One-line form (from GitHub):
-  iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/lca/main/install.ps1 | iex
+  iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/Lca/main/install.ps1 | iex
 
 Or:  powershell -File install.ps1
 

@@ -26,7 +26,7 @@ if [ -n "${1:-}" ]; then
   VER="${1}"
 elif [ -f "RELEASES.md" ]; then
   # auto-increment patch: read last version from RELEASES.md, bump patch
-  last="$(grep -m1 '^## \[v' RELEASES.md 2>/dev/null | grep -oE '[0-9]+\.[0-9]+.[0-9]+' || echo "5.0.0")"
+  last="$(grep -m1 '^## \[v' RELEASES.md 2>/dev/null | grep -oE '[0-9]+\.[0-9]+.[0-9]+' || echo "5.0.1")"
   major="$(printf '%s' "${last}" | cut -d. -f1)"
   minor="$(printf '%s' "${last}" | cut -d. -f2)"
   patch="$(printf '%s' "${last}" | cut -d. -f3)"
@@ -104,4 +104,4 @@ echo "  tag    : v${VER}"
 echo "  remote : $(git remote get-url origin 2>/dev/null | sed 's|git@github.com:||;s|https://github.com/||')"
 echo ""
 echo "Smoke-test the one-liner:"
-echo "  curl -fsSL https://raw.githubusercontent.com/bigfguy8/lca/main/install.sh | sh"
+echo "  curl -fsSL https://raw.githubusercontent.com/bigfguy8/Lca/main/install.sh | sh"

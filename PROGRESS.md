@@ -56,8 +56,8 @@ test harness. Items 19–23 are the v5 additions.
 
 ### 3.1 One-line install + first run
 ```
-$ curl -fsSL https://raw.githubusercontent.com/bigfguy8/lca/main/install.sh | sh
-✓ lca v4 installed to /home/you/lca (tier: free)
+$ curl -fsSL https://raw.githubusercontent.com/bigfguy8/Lca/main/install.sh | sh
+✓ lca v5 installed to /home/you/lca (tier: free)
   Run: lca "build me a python todo app"
   Skills: lca --skill debug "fix the crash"
   Models: lca models   Memory: lca --memory   GPU: auto (vulkan>metal>cuda>cpu)
@@ -167,7 +167,7 @@ $ lca --security
 
 ### 3.8 Cross-platform (Windows)
 ```
-PS> iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/lca/main/install.ps1 | iex
+PS> iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/Lca/main/install.ps1 | iex
 ✓ lca v5 installed to C:\Users\you\lca
 
 C:\> lca.cmd "build a todo app"
@@ -349,3 +349,14 @@ device.*
 - [x] `core/lca_core` rebuilt + re-signed; `lca_core.sha256` refreshed.
 - [x] `core/manifest.json` → 5.0.1.
 - [x] Tagged `v5.0.1-r1` (after header + docs polish).
+
+## v5.0.1-r4 (2026-11-15) — update path fully fixed
+- [x] `sign_manifest.sh` and `lca-update` now hash the same body
+      (`"sig": "PLACEHOLDER"` substitution on both sides).
+- [x] `lca-update` `LCA_HOME` fixed (`../..` -> `..`).
+- [x] `bin/lca.sh` routes `--upgrade` to `bin/lca-update`.
+- [x] Manifest re-signed with `bigfguy8/Lca` URLs
+      (sig `94a23bd5…`).
+- [x] **End-to-end verified**: `lca-update` successfully completed
+      fetch → sig-verify → SHA256 → swap → stamp against the live
+      public GitHub repo for the first time since v5.0.0.

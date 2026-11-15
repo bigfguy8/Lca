@@ -2,7 +2,7 @@
 # lca v5 installer — cross-platform (Termux / Linux / macOS / Git-Bash).
 #
 # One-line form (from GitHub):
-#   curl -fsSL https://raw.githubusercontent.com/bigfguy8/lca/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/bigfguy8/Lca/main/install.sh | sh
 #
 # Self-contained form:
 #   sh install.sh          # from the lca/ project dir
@@ -37,7 +37,7 @@ if [ ! -d "${LCA_SRC}/bin" ] || [ ! -d "${LCA_SRC}/core" ] || [ ! -d "${LCA_SRC}
     echo "install.sh: no local source — cloning into ${BOOTDIR}…" >&2
     rm -rf "${BOOTDIR}"
     # git clone creates the target dir itself; do NOT mkdir -p first.
-    git clone --depth 1 https://github.com/bigfguy8/lca.git "${BOOTDIR}" >&2
+    git clone --depth 1 https://github.com/bigfguy8/Lca.git "${BOOTDIR}" >&2
     LCA_DIR="${BOOTDIR}"
     LCA_SRC="${BOOTDIR}"
     BOOTSTRAPPED=1          # source == install dir; skip the rm/cp below

@@ -21,9 +21,9 @@ auto-discovery**, and an optional **localhost web UI**.
 ```bash
 # from GitHub (after you publish the repo)
 #   Linux / Termux / macOS:
-curl -fsSL https://raw.githubusercontent.com/bigfguy8/lca/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/bigfguy8/Lca/main/install.sh | sh
 #   Windows (PowerShell):
-iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/lca/main/install.ps1 | iex
+iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/Lca/main/install.ps1 | iex
 
 # self-contained, no network needed for the agent itself
 bash /sdcard/download/lca/install.sh        # Termux / Linux / macOS
@@ -203,7 +203,7 @@ lca/
 │   │                     #   Ollama/LM-Studio discovery
 │   ├── lca_core.sha256   # integrity gate — launcher refuses to run if core edited
 │   ├── registry.json     # model registry (user-editable; closed core reads it)
-│   ├── manifest.json     # signed manifest for auto-update (v5.0.0)
+│   ├── manifest.json     # signed manifest for auto-update (v5.0.1)
 │   ├── build_core.sh     # (maintainer) obfuscate + checksum the core
 │   └── sign_manifest.sh  # (maintainer) sign a release manifest
 ├── install.sh            # one-line installer: Termux / Linux / macOS / Git-Bash
