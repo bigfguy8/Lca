@@ -1,4 +1,4 @@
-# LCA v5.0.1 → v5.0.2 — Handoff & Context
+# LCA v5.0.2 → v5.0.3 — Handoff & Context
 **Date:** 2026-11-15 (late session)
 **Repo:** github.com/bigfguy8/Lca (public, MIT)
 **Working dir:** ~/lca (Termux)
@@ -13,7 +13,7 @@ update/upgrade session can resume without re-deriving anything.
 - **The update loop WORKS for the first time since v5.0.0.**
   `bash bin/lca-update` → fetch manifest → verify sig → verify core
   SHA256 → verify registry SHA256 → swap → stamp. Proven live.
-- **12 bugs fixed** across launcher / core / updater / manifest /
+- **14 bugs fixed** across launcher / core / updater / manifest /
   signer / installers / docs.
 - **9 tags on origin:** v5.0.1, -r1…-r7, v5.0.2.
 - **No blocking bugs.** Everything user-facing works.
@@ -25,6 +25,7 @@ update/upgrade session can resume without re-deriving anything.
 
 WORKING — verified end-to-end:
   bash bin/lca.sh --help              → full command banner
+  bash bin/lca.sh --doctor            → system report (v5.0.2+)   ✅
   bash bin/lca.sh models              → registry list + auto-discovery
   bash bin/lca.sh --upgrade           → routes to bin/lca-update
   bash bin/lca-update                 → full fetch/verify/swap loop
@@ -35,11 +36,11 @@ WORKING — verified end-to-end:
   bash bin/lca.sh --license           → tier/license status
 
 INTEGRITY — all verified:
-  manifest core_sha256  = d75e9e6d3064b2c30a9468e6a0f21e0230e0835f6b6b24c5a23dc652a2f8fcf2
-  local lca_core hash   = d75e9e6d... (SAME)
+  manifest core_sha256  = 45cd5d8ce7fd303e20657c0abe5f7133f522baf0d904172f746b1c2cacb9dcff
+  local lca_core hash   = 45cd5d8c... (SAME)
   manifest reg_sha256   = 71c6574d0c1936fdba11d36025a0546a9dcc585a97a0825261b6d784d8124599
   local registry hash   = 71c6574d... (SAME)
-  manifest sig          = 94a23bd5d96bd7c4fb7edad55e82523c900e6c3384ab41b3c9878ba37f08a7df
+  manifest sig          = a49498d234eb69185d161981d932f850031e6bf2b91e024b451e6c4ecf46fa94
   lca_core.sha256 file  = d75e9e6d... (SAME as manifest)
 
 ═══════════════════════════════════════════════════════════════
