@@ -5,12 +5,12 @@
 # 2. Obfuscates it:
 #      a. strip full-line '#' comments
 #      b. base64-wrap the master-prompt block (not grep-able in the shipped file)
-#      c. mangle the tool-loop counter i -> it
 # 3. Writes the obfuscated version back over core/lca_core
 # 4. Computes + writes core/lca_core.sha256 (the launcher's integrity gate)
 #
-# The shipped core is a bash script (run under bash / Termux). We use `$( )`
-# command substitution for the base64 decode, which is safe in bash.
+# Pure POSIX + coreutils (base64, sed, awk) — no python required. The shipped
+# core is a bash script (run under bash / Termux); the base64 decode uses
+# `$( )` command substitution, which is safe in bash.
 #
 # This is anti-inspection, not crypto. Rebuild + re-sign before every release.
 
@@ -24,29 +24,35 @@ grep -vE '^[[:space:]]*#' "${SRC}" > "${tmp}"
 
 # ---- b. base64-wrap the master-prompt block --------------------------
 # The block is:   BASE_MASTER="<multi-line text>"
-# We capture the whole assignment, base64 the captured text, and rewrite it
-# as:   BASE_MASTER="$(printf '%s' '<b64>' | base64 -d)"
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "${tmp}" <<'PYEOF'
-import re, sys, base64
-p = sys.argv[1]
-s = open(p).read()
-m = re.search(r'^BASE_MASTER="((?:.|\n)*?)"\s*$', s, re.M | re.S)
-if m:
-    b64 = base64.b64encode(m.group(1).encode()).decode()
-    repl = 'BASE_MASTER="$(printf \'%s\' \'\'' + b64 + "' | base64 -d)"'
-    s = s[:m.start()] + repl + s[m.end():]
-    open(p, "w").write(s)
-PYEOF
-else
-  echo "  (no python3 — base64 wrap skipped, comments still stripped)" >&2
+# spanning several lines, ending with the line whose first chars are just `"`.
+# We: locate the start line, find the matching end (the line that is exactly
+# the closing quote), capture the body in between, base64-encode it, and
+# replace the whole range with a single-line decode:
+#     BASE_MASTER="$(printf '%s' '<b64>' | base64 -d)"
+start="$(grep -n '^BASE_MASTER=' "${tmp}" | head -1 | cut -d: -f1)"
+if [[ -n "${start}" ]]; then
+  # The block ends at the line that ENDS with a closing double-quote
+  # (the last line of the multi-line string literal). Find it after ${start}.
+  end="$(awk -v s="${start}" 'NR>=s && /"[[:space:]]*$/ {print NR; exit}' "${tmp}")"
+  if [[ -n "${end}" && "${end}" -gt "${start}" ]]; then
+    # Capture the body: strip the leading 'BASE_MASTER="' from the first line
+    # and the trailing '"' from the last line.
+    body="$(sed -n "${start},${end}p" "${tmp}" \
+            | sed "1s/^BASE_MASTER=\"//; \${s/\"$//} ")"
+    b64="$(printf '%s' "${body}" | base64 | tr -d '\n')"
+    # Build the single-line decode replacement in a variable (no nested-quote
+    # printf pitfalls), then splice: lines before start + decode + lines after.
+    decode_line="BASE_MASTER=\"\$(printf '%s' '${b64}' | base64 -d)\""
+    { sed -n "1,$((start-1))p" "${tmp}"
+      printf '%s\n' "${decode_line}"
+      sed -n "$((end+1)),\$p" "${tmp}"
+    } > "${tmp}.wrap"
+    mv "${tmp}.wrap" "${tmp}"
+    echo "  base64-wrapped the master-prompt block (lines ${start}-${end})"
+  else
+    echo "  WARN: could not locate the BASE_MASTER block end; leaving prompt plaintext" >&2
+  fi
 fi
-
-# ---- c. (counter mangle dropped — fragile) ---------------------------
-# The tool-loop counter `i` is referenced in ~5 places (banner, [${i}] You:,
-# turns=${i}, etc.). Hand-mangling it with sed is brittle; the real value of
-# the build is hiding the *master prompt* (step b), which is the part that
-# reveals the agent's behavior. We leave the counter name as-is.
 
 # ---- install + checksum --------------------------------------------
 cp "${tmp}" "${SRC}"

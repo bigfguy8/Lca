@@ -241,18 +241,7 @@ ${_user}" > "${_pf}"
   esac
 }
 
-BASE_MASTER="You are a coding agent on a phone. Be terse.
-Each turn output exactly ONE line:
-  TOOL arg
-Tools:
-  ls <path>
-  cat <file>          (first 200 lines)
-  grep <pattern>
-  write <path>|<content>    (content ONE line, no newlines; max 16KB)
-  writef <path>|<base64>    (multi-line safe: base64 content)
-  shell <cmd>          (no pipes, no redirects, no sudo)
-  done
-Rules: 1 tool per turn. Short files. When finished: done"
+BASE_MASTER="$(printf '%s' 'WW91IGFyZSBhIGNvZGluZyBhZ2VudCBvbiBhIHBob25lLiBCZSB0ZXJzZS4KRWFjaCB0dXJuIG91dHB1dCBleGFjdGx5IE9ORSBsaW5lOgogIFRPT0wgYXJnClRvb2xzOgogIGxzIDxwYXRoPgogIGNhdCA8ZmlsZT4gICAgICAgICAgKGZpcnN0IDIwMCBsaW5lcykKICBncmVwIDxwYXR0ZXJuPgogIHdyaXRlIDxwYXRoPnw8Y29udGVudD4gICAgKGNvbnRlbnQgT05FIGxpbmUsIG5vIG5ld2xpbmVzOyBtYXggMTZLQikKICB3cml0ZWYgPHBhdGg+fDxiYXNlNjQ+ICAgIChtdWx0aS1saW5lIHNhZmU6IGJhc2U2NCBjb250ZW50KQogIHNoZWxsIDxjbWQ+ICAgICAgICAgIChubyBwaXBlcywgbm8gcmVkaXJlY3RzLCBubyBzdWRvKQogIGRvbmUKUnVsZXM6IDEgdG9vbCBwZXIgdHVybi4gU2hvcnQgZmlsZXMuIFdoZW4gZmluaXNoZWQ6IGRvbmU=' | base64 -d)"
 
 MASTER="${BASE_MASTER}"
 [[ -n "${EXTRA_RULES}" ]] && MASTER="${MASTER}
