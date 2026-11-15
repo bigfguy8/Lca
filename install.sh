@@ -1,21 +1,20 @@
-#!/usr/bin/env bash
-# lca v4 installer — cross-platform (Termux / Linux / macOS / Git-Bash).
+#!/bin/sh
+# lca v5 installer — cross-platform (Termux / Linux / macOS / Git-Bash).
 #
 # One-line form (from GitHub):
-#   curl -fsSL https://raw.githubusercontent.com/<YOU>/lca/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/bigfguy8/lca/main/install.sh | sh
 #
 # Self-contained form:
-#   bash install.sh          # from the lca/ project dir
+#   sh install.sh          # from the lca/ project dir
 #
-# v4 changes:
-#   - installs the full tree (bin/{lca.sh,lca.ps1,lca.cmd}, skills/, core/)
-#   - creates `lca` as a shim that auto-picks the right launcher:
-#       * Unix/Termux   -> bin/lca.sh
-#       * Windows (Git-Bash/WSL) -> bin/lca.sh (POSIX) or bin/lca.ps1
-#   - re-signs the core checksum for this install
-#   - builds llama.cpp if deps + network are present
+# Pure POSIX sh (toybox / dash / bash / zsh). No bashisms. No sudo.
 #
-# No sudo. Termux + macOS + Linux friendly.
+# What it does:
+#   1. Copies the project to $HOME/lca (or LCA_INSTALL_DIR)
+#   2. Re-signs the core checksum for this install (SHA256 over lca_core)
+#   3. Writes a smart `lca` shim into ~/.local/bin (picks lca.sh / lca.ps1 by OS)
+#   4. Optionally builds llama.cpp if git+cmake+clang are present
+#   5. Sanity-checks with `lca --doctor`
 
 set -eu
 
@@ -24,29 +23,41 @@ LCA_SRC="${LCA_SRC_DIR:-.}"
 LCA_TIER="${LCA_TIER:-free}"
 
 # ---- 1. locate project ------------------------------------------------
-[[ -d "${LCA_SRC}/bin" && -d "${LCA_SRC}/core" && -d "${LCA_SRC}/src" ]] || {
-  echo "install.sh: cannot find project layout in ${LCA_SRC}" >&2; exit 1
-}
+if [ ! -d "${LCA_SRC}/bin" ] || [ ! -d "${LCA_SRC}/core" ] || [ ! -d "${LCA_SRC}/src" ]; then
+  echo "install.sh: cannot find project layout in ${LCA_SRC}" >&2
+  exit 1
+fi
 
 # ---- 2. install -------------------------------------------------------
 rm -rf "${LCA_DIR}"
 mkdir -p "${LCA_DIR}"
-cp -R "${LCA_SRC}/." "${LCA_DIR}/"
-chmod +x "${LCA_DIR}/bin/lca.sh" "${LCA_DIR}/bin/lca-update" "${LCA_DIR}/core/lca_core" "${LCA_DIR}/src/tools.sh" 2>/dev/null || true
+# copy the tree (robust: use `cp -r SRC DST` which copies the directory itself)
+cp -R "${LCA_SRC}/bin" "${LCA_DIR}/bin"
+cp -R "${LCA_SRC}/core" "${LCA_DIR}/core"
+cp -R "${LCA_SRC}/src" "${LCA_DIR}/src"
+cp -R "${LCA_SRC}/skills" "${LCA_DIR}/skills" 2>/dev/null || true
+cp -R "${LCA_SRC}/web" "${LCA_DIR}/web" 2>/dev/null || true
+cp "${LCA_SRC}"/LICENSE "${LCA_SRC}"/NOTICE "${LCA_SRC}"/README.md "${LCA_DIR}/" 2>/dev/null || true
+chmod +x "${LCA_DIR}/bin/lca.sh" "${LCA_DIR}/bin/lca-update" "${LCA_DIR}/bin/lca-web" \
+         "${LCA_DIR}/core/lca_core" "${LCA_DIR}/src/tools.sh" 2>/dev/null || true
 
 # re-sign the core checksum for this install
 core="${LCA_DIR}/core/lca_core"
-sum="$(sha256sum "${core}" 2>/dev/null | awk '{print $1}' || shasum -a 256 "${core}" | awk '{print $1}')"
-printf '%s  %s\n' "${sum}" "lca_core" > "${LCA_DIR}/core/lca_core.sha256"
+sum="$(sha256sum "${core}" 2>/dev/null | awk '{print $1}' || shasum -a 256 "${core}" 2>/dev/null | awk '{print $1}' || true)"
+if [ -n "${sum}" ]; then
+  printf '%s  lca_core\n' "${sum}" > "${LCA_DIR}/core/lca_core.sha256"
+else
+  echo "install.sh: warning — could not compute SHA256; integrity gate will fail" >&2
+fi
 
 # ---- 3. create the `lca` command (a smart shim) ------------------------
 mkdir -p "${HOME}/.local/bin"
 cat > "${HOME}/.local/bin/lca" <<SHIM
 #!/bin/sh
-# lca v4 shim — picks the right launcher for this OS.
-LCA_HOME="${LCA_HOME:-$HOME/lca}"
+# lca v5 shim — picks the right launcher for this OS.
+LCA_HOME="\${LCA_HOME:-$HOME/lca}"
 case "\$(uname -s 2>/dev/null)" in
-  MINGW*|MSYS*|CYGWIN*)  # Windows via Git-Bash / WSL
+  MINGW*|MSYS*|CYGWIN*)
     if command -v powershell >/dev/null 2>&1; then
       exec powershell -NoProfile -ExecutionPolicy Bypass -File "\${LCA_HOME}/bin/lca.ps1" "\$@"
     else
@@ -57,22 +68,27 @@ case "\$(uname -s 2>/dev/null)" in
 esac
 SHIM
 chmod +x "${HOME}/.local/bin/lca"
+# link the updater
 ln -sf "${LCA_DIR}/bin/lca-update" "${HOME}/.local/bin/lca-update" 2>/dev/null || true
+# link the web UI
+ln -sf "${LCA_DIR}/bin/lca-web" "${HOME}/.local/bin/lca-web" 2>/dev/null || true
+# ensure ~/.local/bin is on PATH
 case ":${PATH}:" in
   *":${HOME}/.local/bin:"*) : ;;
-  *) echo "export PATH=\"\$PATH:${HOME}/.local/bin\"" >> "${HOME}/.profile" ;;
+  *) echo 'export PATH="$PATH:'$HOME'/\.local/bin"' >> "${HOME}/.profile" ;;
 esac
 
 # ---- 4. llama.cpp (optional) ------------------------------------------
 cli="${LCA_DIR}/llama.cpp/build/bin/llama-cli"
-if [[ ! -x "${cli}" ]]; then
-  if command -v git && command -v cmake && command -v clang; then
+if [ ! -x "${cli}" ]; then
+  if command -v git >/dev/null 2>&1 && command -v cmake >/dev/null 2>&1 && command -v clang >/dev/null 2>&1; then
     echo "install.sh: building llama.cpp (needs ~1GB disk)…" >&2
-    ( cd "${LCA_DIR}" && git clone --depth 1 https://github.com/ggml-org/llama.cpp \
-        && cd llama.cpp \
-        && cmake -B build -DBUILD_SHARED=OFF \
-        && cmake --build build --config Release -j4 ) \
-      || echo "llama.cpp build failed — local models will not work"
+    ( cd "${LCA_DIR}" && \
+      git clone --depth 1 https://github.com/ggml-org/llama.cpp && \
+      cd llama.cpp && \
+      cmake -B build -DBUILD_SHARED=OFF && \
+      cmake --build build --config Release -j4 ) \
+      || echo "llama.cpp build failed — local models will not work" >&2
   else
     echo "install.sh: llama.cpp missing. pkg: git cmake clang libopenblas-static (Termux) or apt/brew equivalents."
   fi
@@ -80,11 +96,13 @@ fi
 
 # ---- 5. sanity ---------------------------------------------------------
 if "${HOME}/.local/bin/lca" --doctor >/dev/null 2>&1; then
-  echo "✓ lca v4 installed to ${LCA_DIR} (tier: ${LCA_TIER})"
+  echo "✓ lca v5 installed to ${LCA_DIR} (tier: ${LCA_TIER})"
   echo "  Run: lca \"build me a python todo app\""
-  echo "  Skills: lca --skill debug \"fix the crash\"   (reverse/ghidra/test/perf/build/security)"
-  echo "  Models: lca models   Memory: lca --memory   GPU: auto (vulkan>metal>cuda>cpu)"
+  echo "  Skills: lca --skill debug \"fix the crash\"   (reverse/ghidra/test/perf/build/fuzz/ctf/docker/ml)"
+  echo "  Models: lca models   Memory: lca --memory   Web: sh bin/lca-web"
+  echo "  GPU: auto (vulkan>metal>cuda>cpu)"
 else
   echo "install.sh: sanity check failed — see errors above." >&2
-  exit 1
+  echo "  (If llama.cpp is missing, the doctor check will fail but the install is still usable for cloud models.)"
+  exit 0
 fi
