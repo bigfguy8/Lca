@@ -2,7 +2,7 @@
 **Date:** 2026-11-15 (late session)
 **Repo:** github.com/bigfguy8/Lca (public, MIT)
 **Working dir:** ~/lca (Termux)
-**Latest tag:** v5.0.1-r7 (HEAD = f5c165b)
+**Latest tag:** v5.0.2 (HEAD = 0af7ea7)
 **Purpose of this doc:** preserve full session state so the next
 update/upgrade session can resume without re-deriving anything.
 
@@ -15,7 +15,7 @@ update/upgrade session can resume without re-deriving anything.
   SHA256 → verify registry SHA256 → swap → stamp. Proven live.
 - **12 bugs fixed** across launcher / core / updater / manifest /
   signer / installers / docs.
-- **8 tags on origin:** v5.0.1, -r1, -r2, -r3, -r4, -r5, -r6, -r7.
+- **9 tags on origin:** v5.0.1, -r1…-r7, v5.0.2.
 - **No blocking bugs.** Everything user-facing works.
 - **ClozedCode app: keep installed** — not a release blocker (§5.1).
 
@@ -98,6 +98,14 @@ or deleting. Client-facing functional release is v5.0.1-r4.
   registry_sha256 via sign_manifest.sh, re-sign, commit together.
 
 ═══════════════════════════════════════════════════════════════
+## v5.0.2 (2026-11-15) — core fixes
+- [x] LCA_HOME fallback `../..` → `..` in core/lca_core line 4
+- [x] `UNLIMITED=0; PARALLEL=0` initialized (set -u safety)
+- [x] `memory_inject()` wrapped in `if` + `return 0` (set -e safety)
+- [x] `|| true` on 6 single-line `[[ ]] &&` statements
+- [x] `--doctor` works (direct + via launcher), verified
+- [x] Re-signed: core_sha256 `45cd5d8c…`, sig `a49498d2…`
+
 ## 5. Known deferred work (cosmetic / non-blocking)
 ═══════════════════════════════════════════════════════════════
 

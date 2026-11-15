@@ -360,3 +360,11 @@ device.*
 - [x] **End-to-end verified**: `lca-update` successfully completed
       fetch → sig-verify → SHA256 → swap → stamp against the live
       public GitHub repo for the first time since v5.0.0.
+
+## v5.0.2 (2026-11-15) — --doctor fixed
+- [x] core/lca_core line 4: ../.. → ..
+- [x] UNLIMITED/PARALLEL init
+- [x] memory_inject if-block + return 0
+- [x] || true on 6 single-line [[ ]] &&
+- [x] --doctor works (direct + launcher)
+- [x] re-signed: core_sha256 45cd5d8c…, sig a49498d2…
