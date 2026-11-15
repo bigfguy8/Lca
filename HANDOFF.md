@@ -2,7 +2,7 @@
 **Date:** 2026-11-15 (late session)
 **Repo:** github.com/bigfguy8/Lca (public, MIT)
 **Working dir:** ~/lca (Termux)
-**Latest tag:** v5.0.2 (HEAD = 0af7ea7)
+**Latest tag:** v5.0.2 (tag → 0af7ea7; HEAD = 7950976)
 **Purpose of this doc:** preserve full session state so the next
 update/upgrade session can resume without re-deriving anything.
 
