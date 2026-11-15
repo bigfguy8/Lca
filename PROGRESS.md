@@ -56,7 +56,7 @@ test harness. Items 19–23 are the v5 additions.
 
 ### 3.1 One-line install + first run
 ```
-$ curl -fsSL https://raw.githubusercontent.com/<YOU>/lca/main/install.sh | sh
+$ curl -fsSL https://raw.githubusercontent.com/bigfguy8/lca/main/install.sh | sh
 ✓ lca v4 installed to /home/you/lca (tier: free)
   Run: lca "build me a python todo app"
   Skills: lca --skill debug "fix the crash"
@@ -167,7 +167,7 @@ $ lca --security
 
 ### 3.8 Cross-platform (Windows)
 ```
-PS> iwr -UseBasicParsing https://raw.githubusercontent.com/<YOU>/lca/main/install.ps1 | iex
+PS> iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/lca/main/install.ps1 | iex
 ✓ lca v5 installed to C:\Users\you\lca
 
 C:\> lca.cmd "build a todo app"

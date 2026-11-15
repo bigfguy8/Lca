@@ -23,9 +23,21 @@ LCA_SRC="${LCA_SRC_DIR:-.}"
 LCA_TIER="${LCA_TIER:-free}"
 
 # ---- 1. locate project ------------------------------------------------
+# If no local source layout is present (the `curl | sh` bootstrap case),
+# clone the repo into $LCA_DIR first, then install from there.
 if [ ! -d "${LCA_SRC}/bin" ] || [ ! -d "${LCA_SRC}/core" ] || [ ! -d "${LCA_SRC}/src" ]; then
-  echo "install.sh: cannot find project layout in ${LCA_SRC}" >&2
-  exit 1
+  if [ -d "${LCA_DIR}/bin" ] && [ -d "${LCA_DIR}/core" ]; then
+    LCA_SRC="${LCA_DIR}"          # already cloned from a previous run
+  elif command -v git >/dev/null 2>&1; then
+    echo "install.sh: no local source — cloning from GitHub…" >&2
+    rm -rf "${LCA_DIR}"
+    git clone --depth 1 https://github.com/bigfguy8/lca.git "${LCA_DIR}" >&2
+    LCA_SRC="${LCA_DIR}"
+  else
+    echo "install.sh: cannot find project layout in ${LCA_SRC} and git is missing." >&2
+    echo "install.sh: run from the lca/ project dir (sh install.sh) or install git first." >&2
+    exit 1
+  fi
 fi
 
 # ---- 2. install -------------------------------------------------------

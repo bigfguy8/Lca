@@ -37,7 +37,7 @@ the core + registry and checks their SHA256s before swapping.
 1. Edit the core (the readable source), run `bash core/build_core.sh`.
 2. Update `core/registry.json` if you added/removed model entries.
 3. Sign: `bash core/sign_manifest.sh <version>`, and replace the
-   `<YOUR_USER>` placeholders in the manifest with your GitHub handle.
+   `bigfguy8` placeholders in the manifest with your GitHub handle.
 4. Commit all three files to `main` (or a release tag).
 
 Free-tier users get at most one auto-update per 30 days; Pro-tier users update

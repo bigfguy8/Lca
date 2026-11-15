@@ -21,9 +21,9 @@ auto-discovery**, and an optional **localhost web UI**.
 ```bash
 # from GitHub (after you publish the repo)
 #   Linux / Termux / macOS:
-curl -fsSL https://raw.githubusercontent.com/<YOUR_USER>/lca/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/bigfguy8/lca/main/install.sh | sh
 #   Windows (PowerShell):
-iwr -UseBasicParsing https://raw.githubusercontent.com/<YOUR_USER>/lca/main/install.ps1 | iex
+iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/lca/main/install.ps1 | iex
 
 # self-contained, no network needed for the agent itself
 bash /sdcard/download/lca/install.sh        # Termux / Linux / macOS

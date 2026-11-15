@@ -1,8 +1,8 @@
 <#
-lca v4 — Windows installer (public, MIT)
+lca v5 — Windows installer (public, MIT)
 
 One-line form (from GitHub):
-  iwr -UseBasicParsing https://raw.githubusercontent.com/<YOU>/lca/main/install.ps1 | iex
+  iwr -UseBasicParsing https://raw.githubusercontent.com/bigfguy8/lca/main/install.ps1 | iex
 
 Or:  powershell -File install.ps1
 
@@ -67,5 +67,5 @@ if (-not (Test-Path $cli)) {
 
 # 5. sanity
 & (Join-Path $InstallDir "bin\lca.ps1") --doctor 2>&1 | Out-Host
-Write-Host "✓ lca v4 installed to $InstallDir"
+Write-Host "✓ lca v5 installed to $InstallDir"
 Write-Host "  Run: lca `"build a todo app`"   (or: lca.cmd `"prompt`")
