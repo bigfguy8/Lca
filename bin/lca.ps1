@@ -1,5 +1,5 @@
 <#
-lca v4 — Windows launcher (public, MIT)
+lca v5 — Windows launcher (public, MIT)
 
 Works from PowerShell directly, and from CMD via bin\lca.cmd (a thin wrapper).
 Mirrors the Unix launcher (bin/lca.sh): integrity-gates the closed core,

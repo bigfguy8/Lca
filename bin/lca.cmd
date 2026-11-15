@@ -1,5 +1,5 @@
 @echo off
-REM lca v4 — CMD wrapper (public, MIT). Calls the PowerShell launcher.
+REM lca v5 — CMD wrapper (public, MIT). Calls the PowerShell launcher.
 REM Usage:  lca.cmd "build a todo app"
 REM Requires PowerShell 5+ (preinstalled on Windows 10/11).
 

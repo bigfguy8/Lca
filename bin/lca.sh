@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lca v4 — cross-platform launcher (public, MIT)
+# lca v5 — cross-platform launcher (public, MIT)
 #
 # This launcher is POSIX-portable: it runs under Termux, Linux, macOS, and even
 # inside a Git-Bash / WSL environment on Windows. For native Windows use the

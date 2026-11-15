@@ -7,6 +7,21 @@ the core + registry and checks their SHA256s before swapping.
 
 ## Changelog
 
+### v5.0.1 (2026-11-15)
+- **Launchers**: header version bumped v4 → v5 across `lca.sh`, `lca.ps1`,
+  `lca.cmd` (content unchanged — the v5.0.0 bodies were already correct).
+- **`bin/lca-web`**: fixed `set -eu` interaction with the nc fallback path;
+  parallel-tool plumbing corrected.
+- **`bin/lca-update`**: reads the correct manifest (`update.url` from
+  `manifest.json`, not `registry.json`); hardened signature extraction.
+- **`src/tools.sh`**: POSIX-compat fix (bashism truncation).
+- **`core/lca_core`**: rebuilt + re-signed for v5.0.1.
+- **`core/manifest.json`**: `version` → `5.0.1`, `core_sha256` refreshed;
+  `registry_sha256` unchanged.
+- **Repo hygiene**: removed nested `bin/bin/`, `core/core/`, `src/src/`,
+  `skills/skills/`, `web/web/`, and root-level stray duplicates left over
+  from an earlier copy operation.
+
 ### v5.0.0 (2026-11-15)
 - **License sub-commands**: `lca --license` (show), `--license-verify`,
   `--license-new <email>` (maintainer issues a signed Pro license). Offline

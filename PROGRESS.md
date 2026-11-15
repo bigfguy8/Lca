@@ -341,3 +341,11 @@ decides which skill to use is in the closed core. Add your own by appending a
 
 *The closed core is the moat. Everything else is open, auditable, and on your
 device.*
+
+## v5.0.1 (2026-11-15) — done
+- [x] 9 bugfixes applied: memory_note JSON, bashism truncation, manifest comma,
+      lca-update file source, shell guard, lca-web nc set-eu, install bootstrap
+      mkdir, launcher header bump (v4→v5), repo duplicate cleanup.
+- [x] `core/lca_core` rebuilt + re-signed; `lca_core.sha256` refreshed.
+- [x] `core/manifest.json` → 5.0.1.
+- [x] Tagged `v5.0.1-r1` (after header + docs polish).
