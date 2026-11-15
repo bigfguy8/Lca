@@ -23,11 +23,11 @@ LCA_SRC="${LCA_SRC_DIR:-.}"
 LCA_TIER="${LCA_TIER:-free}"
 
 # ---- 1. locate project ------------------------------------------------
-# If no local source layout is present (the `curl | sh` bootstrap case),
-# clone the repo into $LCA_DIR first, then install from there.
+# Detect the bootstrap case: no local source layout in LCA_SRC.
 if [ ! -d "${LCA_SRC}/bin" ] || [ ! -d "${LCA_SRC}/core" ] || [ ! -d "${LCA_SRC}/src" ]; then
-  if [ -d "${LCA_DIR}/bin" ] && [ -d "${LCA_DIR}/core" ]; then
-    LCA_SRC="${LCA_DIR}"          # already cloned from a previous run
+  # If LCA_INSTALL_DIR was explicitly given and already holds a checkout, reuse it.
+  if [ -n "${LCA_INSTALL_DIR:-}" ] && [ -d "${LCA_DIR}/bin" ] && [ -d "${LCA_DIR}/core" ]; then
+    LCA_SRC="${LCA_DIR}"
   elif command -v git >/dev/null 2>&1; then
     echo "install.sh: no local source — cloning from GitHub…" >&2
     rm -rf "${LCA_DIR}"
@@ -39,6 +39,21 @@ if [ ! -d "${LCA_SRC}/bin" ] || [ ! -d "${LCA_SRC}/core" ] || [ ! -d "${LCA_SRC}
     exit 1
   fi
 fi
+
+# Safety: never install into a dir that is the same as (or a parent of) the
+# source we just located — that would `rm -rf` the source before the copy.
+case "${LCA_SRC}" in
+  "${LCA_DIR}"|"${LCA_DIR}/"*)
+    echo "install.sh: LCA_SRC (${LCA_SRC}) is inside LCA_DIR (${LCA_DIR}); refusing to self-delete." >&2
+    echo "install.sh: pass LCA_INSTALL_DIR pointing elsewhere, or run from a clean checkout." >&2
+    exit 1 ;;
+esac
+case "${LCA_DIR}" in
+  "${LCA_SRC}"|"${LCA_SRC}/"*)
+    echo "install.sh: LCA_DIR (${LCA_DIR}) is the source dir; install to a fresh dir instead." >&2
+    echo "install.sh: try: LCA_INSTALL_DIR=\$HOME/lca-install sh install.sh" >&2
+    exit 1 ;;
+esac
 
 # ---- 2. install -------------------------------------------------------
 rm -rf "${LCA_DIR}"
